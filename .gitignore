@@ -1,6 +1,7 @@
 # Private family data — never commit
 seed.local.sql
 .dev.vars
+wrangler.local.toml
 
 # Tooling
 node_modules/

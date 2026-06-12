@@ -36,6 +36,10 @@ npm run db:seed       # load the fictional example family
 npm run dev           # http://localhost:8787
 ```
 
+(The first `npm run` copies `wrangler.toml` to a gitignored `wrangler.local.toml` —
+that's where your own database id, URL, and timezone will live, so none of your
+family's details can ever end up in version control.)
+
 Family password: `example`. Example PINs: Alex `1111`, Bailey `2222`, all kids `0000`.
 
 Run the logic tests with `npm test`.
@@ -47,7 +51,7 @@ Run the logic tests with `npm test`.
    npx wrangler login
    npx wrangler d1 create family-leaderboard
    ```
-2. Copy the printed `database_id` into `wrangler.toml`.
+2. Copy the printed `database_id` into `wrangler.local.toml`.
 3. Set your family in a **gitignored** seed file:
    ```sh
    cp seed.example.sql seed.local.sql
@@ -62,13 +66,13 @@ Run the logic tests with `npm test`.
    ```
    The admin can change the password later from inside the app (Profile →
    Change family password); the in-app value overrides this secret.
-5. Set your timezone in `wrangler.toml` (`FAMILY_TZ`), then:
+5. Set your timezone in `wrangler.local.toml` (`FAMILY_TZ`), then:
    ```sh
    npm run db:schema:remote
    npm run db:seed:local:remote
    npm run deploy
    ```
-6. Update `APP_URL` in `wrangler.toml` to your `*.workers.dev` URL and deploy again.
+6. Update `APP_URL` in `wrangler.local.toml` to your `*.workers.dev` URL and deploy again.
 7. Everyone opens the URL on their phone, enters the family password once,
    then Share → **Add to Home Screen**.
 
@@ -111,8 +115,9 @@ Run the logic tests with `npm test`.
 ## Privacy & access model
 
 - **Repo**: ships only with fictional example data (`seed.example.sql`). Real names,
-  emails, bedtimes, PINs, and food rules go in `seed.local.sql` and `.dev.vars`, both
-  gitignored — they exist only on your machine and in your Cloudflare database.
+  emails, bedtimes, PINs, and food rules go in `seed.local.sql` and `.dev.vars`; your
+  deployment's URL and database id go in `wrangler.local.toml`. All three are
+  gitignored — they exist only on your machine and in your Cloudflare account.
 - **Deployed app**: every API route requires the shared family password, verified
   server-side against a hash stored as a Worker secret (`FAMILY_KEY_HASH`). Without
   it, strangers who find the URL get a lock screen and `401`s — no names, no data.

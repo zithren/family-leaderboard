@@ -6,15 +6,16 @@
   "description": "A zero-cost family leaderboard for bedtime and healthy-eating habits, on Cloudflare Workers + D1.",
   "license": "MIT",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "setup": "cp -n wrangler.toml wrangler.local.toml || true",
+    "dev": "npm run -s setup && wrangler dev -c wrangler.local.toml",
+    "deploy": "wrangler deploy -c wrangler.local.toml",
     "test": "node --test",
     "vapid": "node scripts/generate-vapid.mjs",
-    "db:schema": "wrangler d1 execute family-leaderboard --local --file=schema.sql",
-    "db:seed": "wrangler d1 execute family-leaderboard --local --file=seed.example.sql",
-    "db:seed:local": "wrangler d1 execute family-leaderboard --local --file=seed.local.sql",
-    "db:schema:remote": "wrangler d1 execute family-leaderboard --remote --file=schema.sql",
-    "db:seed:local:remote": "wrangler d1 execute family-leaderboard --remote --file=seed.local.sql"
+    "db:schema": "npm run -s setup && wrangler d1 execute family-leaderboard -c wrangler.local.toml --local --file=schema.sql",
+    "db:seed": "npm run -s setup && wrangler d1 execute family-leaderboard -c wrangler.local.toml --local --file=seed.example.sql",
+    "db:seed:local": "wrangler d1 execute family-leaderboard -c wrangler.local.toml --local --file=seed.local.sql",
+    "db:schema:remote": "wrangler d1 execute family-leaderboard -c wrangler.local.toml --remote --file=schema.sql",
+    "db:seed:local:remote": "wrangler d1 execute family-leaderboard -c wrangler.local.toml --remote --file=seed.local.sql"
   },
   "devDependencies": {
     "wrangler": "^4"
