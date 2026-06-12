@@ -1,5 +1,6 @@
 import { handleApi } from './api.js';
-import { sendDailyReminders, sendWeeklySummary } from './email.js';
+import { sendDailyReminders, sendWeeklySummary, sendMonthlyWinner } from './email.js';
+import { todayInTZ } from './stats.js';
 
 export default {
   async fetch(request, env) {
@@ -16,6 +17,9 @@ export default {
       ctx.waitUntil(sendWeeklySummary(env));
     } else {
       ctx.waitUntil(sendDailyReminders(env));
+      if (todayInTZ(env.FAMILY_TZ).endsWith('-01')) {
+        ctx.waitUntil(sendMonthlyWinner(env));
+      }
     }
   },
 };

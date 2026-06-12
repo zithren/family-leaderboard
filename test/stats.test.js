@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, loggableDates, dayStatus, memberStats } from '../src/stats.js';
+import { addDays, loggableDates, dayStatus, memberStats, prevMonthPrefix } from '../src/stats.js';
 
 const TODAY = '2026-06-11';
 const GRACE = 3;
 const member = { start_date: '2026-06-01' };
 const entry = (date, bedtime, food, chores = true) =>
-  ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0, chores_yes: chores ? 1 : 0 });
+  ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0, chores_yes: chores ? 1 : 0, vacation: 0 });
+const vacation = (date) => ({ date, bedtime_yes: 0, food_yes: 0, chores_yes: 0, vacation: 1 });
 
 test('addDays crosses month boundaries', () => {
   assert.equal(addDays('2026-06-01', -1), '2026-05-31');
@@ -100,6 +101,40 @@ test('pendingDates lists unanswered loggable past days, not today', () => {
   const entries = [entry('2026-06-09', true, true)];
   const s = memberStats(member, entries, TODAY, GRACE);
   assert.deepEqual(s.pendingDates, ['2026-06-08', '2026-06-10']);
+});
+
+test('vacation days bridge streaks and count for nothing', () => {
+  const entries = [
+    entry('2026-06-08', true, true),
+    vacation('2026-06-09'),
+    entry('2026-06-10', true, true),
+  ];
+  const s = memberStats(member, entries, TODAY, GRACE);
+  assert.equal(s.month.perfect, 2);          // vacation adds nothing
+  assert.equal(s.streaks.perfect.current, 2); // ...but doesn't break the chain
+  assert.equal(s.streaks.perfect.longest, 2);
+  assert.deepEqual(s.pendingDates, []);       // a vacation day is settled, not pending
+});
+
+test('vacation status reported as skip', () => {
+  assert.equal(dayStatus(vacation('2026-06-09'), '2026-06-09', TODAY, GRACE, 'bedtime_yes'), 'skip');
+});
+
+test('lastMonth tally counts only the previous month', () => {
+  const m = { start_date: '2026-05-20' };
+  const entries = [
+    entry('2026-05-25', true, true),
+    entry('2026-05-26', true, true),
+    entry('2026-06-01', true, true),
+  ];
+  const s = memberStats(m, entries, TODAY, GRACE);
+  assert.equal(s.lastMonth.perfect, 2);
+  assert.equal(s.month.perfect, 1);
+});
+
+test('prevMonthPrefix crosses year boundaries', () => {
+  assert.equal(prevMonthPrefix('2026-06-11'), '2026-05');
+  assert.equal(prevMonthPrefix('2026-01-05'), '2025-12');
 });
 
 test('month tally only counts current month', () => {

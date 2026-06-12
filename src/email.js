@@ -1,5 +1,13 @@
-import { todayInTZ, addDays, loggableDates } from './stats.js';
+import { todayInTZ, addDays, loggableDates, prevMonthPrefix } from './stats.js';
 import { leaderboard } from './api.js';
+
+/** Rank members by last month's perfect days (ties broken by total yes-days). */
+export function lastMonthRanking(members) {
+  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores;
+  return [...members].sort(
+    (a, b) => b.stats.lastMonth.perfect - a.stats.lastMonth.perfect || score(b) - score(a)
+  );
+}
 
 /** Send one email via Resend. No-op (with a log) if the API key isn't configured. */
 async function sendEmail(env, to, subject, html) {
@@ -51,6 +59,39 @@ export async function sendDailyReminders(env) {
       ${expiring ? `<p><b>Heads up:</b> ${missing[0]} locks in as a "no" after today.</p>` : ''}
       <p><a href="${env.APP_URL}">Tap here to check in</a> — it takes 10 seconds.</p>`;
     await sendEmail(env, m.email, subject, html);
+  }
+}
+
+/** On the 1st: crown last month's champion before the counter resets. */
+export async function sendMonthlyWinner(env) {
+  const today = todayInTZ(env.FAMILY_TZ);
+  const graceDays = parseInt(env.GRACE_DAYS, 10) || 3;
+  const board = await leaderboard(env, today, graceDays);
+  const ranked = lastMonthRanking(board.members);
+  const top = ranked[0];
+  if (!top) return;
+  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores;
+  if (top.stats.lastMonth.perfect === 0 && score(top) === 0) return; // nothing happened last month
+
+  const winners = ranked.filter(
+    (m) => m.stats.lastMonth.perfect === top.stats.lastMonth.perfect && score(m) === score(top)
+  );
+  const names = winners.map((w) => w.name).join(' & ');
+  const monthName = new Date(prevMonthPrefix(today) + '-01T00:00:00').toLocaleDateString('en-US', {
+    month: 'long', year: 'numeric',
+  });
+  const html = `
+    <h2>👑 ${monthName} champion: ${names}!</h2>
+    <p style="font-family:sans-serif">${names} finished ${monthName} with
+    <b>${top.stats.lastMonth.perfect} perfect day${top.stats.lastMonth.perfect === 1 ? '' : 's'}</b> ⭐
+    — congratulations! The counters have reset; a new month starts now.</p>
+    <p style="font-family:sans-serif"><a href="${env.APP_URL}">See the full board</a></p>`;
+
+  const { results: members } = await env.DB.prepare(
+    'SELECT email FROM members WHERE email IS NOT NULL'
+  ).all();
+  for (const m of members) {
+    await sendEmail(env, m.email, `👑 ${monthName} champion: ${names}!`, html);
   }
 }
 

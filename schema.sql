@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS checkins (
   bedtime_yes INTEGER NOT NULL CHECK (bedtime_yes IN (0, 1)),
   food_yes INTEGER NOT NULL CHECK (food_yes IN (0, 1)),
   chores_yes INTEGER NOT NULL CHECK (chores_yes IN (0, 1)),
+  -- Vacation days don't count for or against anyone (travel, sleepovers, holidays).
+  vacation INTEGER NOT NULL DEFAULT 0 CHECK (vacation IN (0, 1)),
   logged_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (member_id, date)
 );

@@ -28,13 +28,21 @@ export function loggableDates(today, graceDays) {
   return dates;
 }
 
+/** The YYYY-MM prefix of the month before the given date's month. */
+export function prevMonthPrefix(today) {
+  const [y, m] = today.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
+}
+
 /**
  * Status of one question on one day.
  * entry: checkin row or undefined. key: 'bedtime_yes' | 'food_yes' | 'chores_yes'.
- * Returns 'yes' | 'no' | 'pending' | 'future'.
+ * Returns 'yes' | 'no' | 'skip' | 'pending' | 'future'.
+ * Vacation days are 'skip' — they never count for or against anyone.
  * Unanswered days older than the grace window lock in as 'no'.
  */
 export function dayStatus(entry, date, today, graceDays, key) {
+  if (entry?.vacation) return 'skip';
   if (entry) return entry[key] ? 'yes' : 'no';
   if (date > today) return 'future';
   if (date >= addDays(today, -graceDays)) return 'pending';
@@ -55,6 +63,7 @@ const QUESTION_KEYS = { bedtime: 'bedtime_yes', food: 'food_yes', chores: 'chore
 
 /** Perfect = every question yes; any answered/locked no sinks the day. */
 function perfectStatus(statuses) {
+  if (statuses[0] === 'skip') return 'skip'; // vacation flags the whole day
   if (statuses.every((s) => s === 'yes')) return 'yes';
   if (statuses.includes('no')) return 'no';
   return 'pending';
@@ -63,10 +72,11 @@ function perfectStatus(statuses) {
 export function memberStats(member, entries, today, graceDays) {
   const byDate = new Map(entries.map((e) => [e.date, e]));
   const monthPrefix = today.slice(0, 7);
+  const lastMonth = prevMonthPrefix(today);
   const yearPrefix = today.slice(0, 4);
 
   const zero = () => ({ bedtime: 0, food: 0, chores: 0, perfect: 0 });
-  const totals = { month: zero(), year: zero(), allTime: zero() };
+  const totals = { month: zero(), lastMonth: zero(), year: zero(), allTime: zero() };
   const streaks = {
     bedtime: { current: 0, longest: 0 },
     food: { current: 0, longest: 0 },
@@ -97,10 +107,11 @@ export function memberStats(member, entries, today, graceDays) {
         totals.allTime[key]++;
         if (d.startsWith(yearPrefix)) totals.year[key]++;
         if (d.startsWith(monthPrefix)) totals.month[key]++;
+        if (d.startsWith(lastMonth)) totals.lastMonth[key]++;
       } else if (status === 'no') {
         run[key] = 0;
       }
-      // 'pending' and 'future': streak run carries over unchanged.
+      // 'pending', 'skip' (vacation) and 'future': streak run carries over unchanged.
     }
   }
 

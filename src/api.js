@@ -1,4 +1,4 @@
-import { todayInTZ, addDays, loggableDates, memberStats } from './stats.js';
+import { todayInTZ, addDays, loggableDates, memberStats, dayStatus } from './stats.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -56,7 +56,7 @@ export async function handleApi(request, env) {
       if (!member) return err('Wrong PIN', 403);
       const dates = loggableDates(today, graceDays);
       const { results: entries } = await env.DB.prepare(
-        'SELECT date, bedtime_yes, food_yes, chores_yes FROM checkins WHERE member_id = ? AND date >= ?'
+        'SELECT date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins WHERE member_id = ? AND date >= ?'
       ).bind(member.id, dates[0]).all();
       const byDate = Object.fromEntries(entries.map((e) => [e.date, e]));
       // Clamp: SQLite's date('now') is UTC, so a freshly seeded start_date can
@@ -85,16 +85,7 @@ export async function handleApi(request, env) {
         return err(`That day can no longer be logged (grace window is ${graceDays} days)`, 400);
       }
       if (date < member.start_date) return err('Date is before your start date', 400);
-      if ([body.bedtimeYes, body.foodYes, body.choresYes].some((v) => typeof v !== 'boolean')) {
-        return err('bedtimeYes, foodYes and choresYes must be true or false', 400);
-      }
-      await env.DB.prepare(
-        `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (member_id, date) DO UPDATE SET
-           bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes,
-           chores_yes = excluded.chores_yes, logged_at = datetime('now')`
-      ).bind(member.id, date, body.bedtimeYes ? 1 : 0, body.foodYes ? 1 : 0, body.choresYes ? 1 : 0).run();
-      return json({ ok: true });
+      return saveCheckin(env, member.id, date, body);
     }
 
     if (request.method === 'POST' && path === '/api/profile') {
@@ -116,6 +107,56 @@ export async function handleApi(request, env) {
           .bind(body.chores.trim(), member.id).run();
       }
       return json({ ok: true });
+    }
+
+    // Admin corrections: edit any member's day, including beyond the grace window.
+    if (request.method === 'POST' && path === '/api/admin/checkin') {
+      const body = await request.json();
+      const actor = await authMember(env, body.adminId, body.pin);
+      if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
+      const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(body.memberId).first();
+      if (!target) return err('No such member', 404);
+      const { date } = body;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) return err('Invalid date', 400);
+      if (date >= today) return err('Only past days can be edited', 400);
+      if (date < target.start_date) return err(`That is before ${target.name}'s start date`, 400);
+      return saveCheckin(env, target.id, date, body);
+    }
+
+    // Month of day-by-day history for one member (whole family can view).
+    if (request.method === 'GET' && path === '/api/history') {
+      const member = await env.DB.prepare('SELECT * FROM members WHERE id = ?')
+        .bind(url.searchParams.get('memberId')).first();
+      if (!member) return err('No such member', 404);
+      const month = url.searchParams.get('month') ?? today.slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) return err('Invalid month', 400);
+      const { results: entries } = await env.DB.prepare(
+        "SELECT date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins WHERE member_id = ? AND date LIKE ?"
+      ).bind(member.id, month + '-%').all();
+      const byDate = new Map(entries.map((e) => [e.date, e]));
+      const [y, m] = month.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const days = [];
+      for (let i = 1; i <= lastDay; i++) {
+        const d = `${month}-${String(i).padStart(2, '0')}`;
+        const entry = byDate.get(d);
+        const statuses = {
+          bedtime: dayStatus(entry, d, today, graceDays, 'bedtime_yes'),
+          food: dayStatus(entry, d, today, graceDays, 'food_yes'),
+          chores: dayStatus(entry, d, today, graceDays, 'chores_yes'),
+        };
+        days.push({
+          date: d,
+          preStart: d < member.start_date,
+          vacation: !!entry?.vacation,
+          logged: !!entry,
+          entry: entry && !entry.vacation
+            ? { bedtime: !!entry.bedtime_yes, food: !!entry.food_yes, chores: !!entry.chores_yes }
+            : null,
+          statuses,
+        });
+      }
+      return json({ member: { id: member.id, name: member.name }, month, today, days });
     }
 
     if (request.method === 'POST' && path === '/api/admin/member') {
@@ -199,6 +240,35 @@ export async function handleApi(request, env) {
   }
 }
 
+/**
+ * Shared by self check-ins and admin corrections (date already validated):
+ * clear wipes the day, vacation marks it as not counting, otherwise all
+ * three answers are required.
+ */
+async function saveCheckin(env, memberId, date, body) {
+  if (body.clear === true) {
+    await env.DB.prepare('DELETE FROM checkins WHERE member_id = ? AND date = ?').bind(memberId, date).run();
+    return json({ ok: true });
+  }
+  const vacation = body.vacation === true;
+  if (!vacation && [body.bedtimeYes, body.foodYes, body.choresYes].some((v) => typeof v !== 'boolean')) {
+    return err('bedtimeYes, foodYes and choresYes must be true or false', 400);
+  }
+  await env.DB.prepare(
+    `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes, vacation) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (member_id, date) DO UPDATE SET
+       bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes,
+       chores_yes = excluded.chores_yes, vacation = excluded.vacation, logged_at = datetime('now')`
+  ).bind(
+    memberId, date,
+    !vacation && body.bedtimeYes ? 1 : 0,
+    !vacation && body.foodYes ? 1 : 0,
+    !vacation && body.choresYes ? 1 : 0,
+    vacation ? 1 : 0
+  ).run();
+  return json({ ok: true });
+}
+
 async function adminCount(env) {
   const row = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM members WHERE role = 'admin'").first();
   return row.cnt;
@@ -208,7 +278,7 @@ async function adminCount(env) {
 export async function leaderboard(env, today, graceDays) {
   const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
   const { results: entries } = await env.DB.prepare(
-    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes FROM checkins'
+    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins'
   ).all();
   const byMember = new Map();
   for (const e of entries) {

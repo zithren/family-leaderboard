@@ -15,7 +15,11 @@ for a family.
 - 🎯 **Personal goals** — everyone has their own bedtime, their own definition of foods to avoid, and their own chore list (one grouped yes/no question)
 - 👨‍👩‍👧‍👦 **Roles** — the admin sets kids' bedtimes and can remove anyone's PIN; adults manage their own goals and can set kids' chores; kids own only their food goal
 - ⏳ **Grace window** — a day becomes loggable once it's over (you log *yesterday*), and stays editable for 3 days; after that it locks in as a "no"
-- 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" (both goals met)
+- 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" (all three goals met)
+- 🏖️ **Vacation days** — mark a day as not counting (travel, sleepovers, holidays); it neither breaks streaks nor adds to tallies
+- 📅 **History calendar** — month-at-a-glance per person: perfect, partial, missed, vacation, and still-loggable days
+- 👑 **Admin corrections** — the admin can tap any past day in the calendar to fix it, even beyond the grace window
+- 🏆 **Monthly champion** — a banner during the first week of each month (and an email on the 1st) crowns last month's winner
 - 📧 **Reminders** — daily email nudge for unanswered days and a weekly leaderboard email (via [Resend](https://resend.com), free tier), both optional
 - 🔒 **Privacy** — all personal data lives only in *your* database; this repo contains none
 

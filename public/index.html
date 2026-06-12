@@ -69,6 +69,26 @@
     width: 100%; font: inherit; background: var(--card2); border: 0; border-radius: 10px;
     padding: 10px 12px; color: var(--text);
   }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .chip { padding: 6px 12px; font-size: .85rem; border-radius: 999px; }
+  .chip.sel { background: var(--accent); color: #1a1a2e; font-weight: 700; }
+  .calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; }
+  .calhead { text-align: center; color: var(--muted); font-size: .7rem; padding: 2px 0; }
+  .cal {
+    aspect-ratio: 1; border-radius: 10px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; font-size: .85rem; background: var(--card2);
+  }
+  .cal.good { background: var(--green); color: #08281f; font-weight: 700; }
+  .cal.part { background: #f4a261; color: #3a2200; font-weight: 700; }
+  .cal.bad { background: var(--red); color: #fff; }
+  .cal.pend { background: none; border: 1px dashed var(--muted); color: var(--muted); }
+  .cal.vac { background: #4f6d9e; color: #fff; }
+  .cal.dim { background: none; color: var(--card2); }
+  .cal-ico { font-size: .6rem; line-height: 1; }
+  .banner {
+    background: linear-gradient(135deg, #b8860b, #ffd166); color: #1a1a2e;
+    border-radius: 16px; padding: 14px 16px; margin: 12px 0; font-weight: 600;
+  }
   .toast {
     position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
     background: var(--green); color: #08281f; font-weight: 700; border-radius: 999px;
@@ -88,6 +108,7 @@
 <nav id="nav" class="hidden">
   <button data-tab="checkin"><span class="ico">✅</span>Check in</button>
   <button data-tab="board"><span class="ico">🏆</span>Board</button>
+  <button data-tab="history"><span class="ico">📅</span>History</button>
   <button data-tab="profile"><span class="ico">⚙️</span>Profile</button>
 </nav>
 <div class="toast" id="toast"></div>
@@ -186,6 +207,7 @@ async function login(id, pinValue, { silent = false } = {}) {
     memberId = id; pin = pinValue;
     localStorage.setItem('memberId', id);
     localStorage.setItem('pin', pinValue);
+    histMemberId = null; histMonth = null; histEdit = null;
     $('#nav').classList.remove('hidden');
     setTab('checkin');
     return true;
@@ -213,7 +235,8 @@ function renderCheckin() {
       <span class="muted">Logging for <b>${me.name}</b></span>
       <button class="linkish" id="switchPerson">👤 Switch person</button>
     </div>` + days.map((d) => {
-    const a = answers[d.date] ?? (d.entry
+    const vac = !!d.entry?.vacation;
+    const a = answers[d.date] ?? (d.entry && !vac
       ? { bedtime: !!d.entry.bedtime_yes, food: !!d.entry.food_yes, chores: !!d.entry.chores_yes }
       : { bedtime: null, food: null, chores: null });
     answers[d.date] = a;
@@ -221,8 +244,12 @@ function renderCheckin() {
       <div class="row">
         <span><span class="daylabel">${relLabel(d.date, me.today)}</span><br>
           <span class="muted">${fmtFull(d.date)}</span></span>
-        <span class="badge ${d.entry ? 'done-badge' : ''}">${d.entry ? '✓ logged' : 'needs an answer'}</span>
+        <span class="badge ${d.entry ? 'done-badge' : ''}">${vac ? '🏖️ vacation' : d.entry ? '✓ logged' : 'needs an answer'}</span>
       </div>
+      ${vac ? `
+      <div class="q" style="text-align:center;padding:8px 0">🏖️ <b>Vacation day</b> — doesn't count for or against you</div>
+      <button class="primary unvacation">Undo vacation</button>
+      ` : `
       <div class="q">🛏️ In bed by <b>${me.bedtime}</b>?<small>your bedtime</small></div>
       <div class="yn" data-q="bedtime">
         <button class="yes ${a.bedtime === true ? 'sel' : ''}">Yes 🎉</button>
@@ -239,33 +266,176 @@ function renderCheckin() {
         <button class="no ${a.chores === false ? 'sel' : ''}">No</button>
       </div>
       <button class="primary save">Save ${relLabel(d.date, me.today).toLowerCase()}</button>
+      <div class="yn" style="margin-top:8px">
+        <button class="vacation">🏖️ Vacation day</button>
+        ${d.entry ? '<button class="clearday">Clear answers</button>' : ''}
+      </div>`}
     </div>`;
   }).join('');
 
   $('#switchPerson').addEventListener('click', logout);
+  const send = async (date, payload, msg) => {
+    try {
+      await api('/api/checkin', { memberId: me.id, pin, date, ...payload });
+      me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+      delete answers[date];
+      toast(msg);
+      renderCheckin();
+    } catch (e) { toast(e.message, true); }
+  };
   view.querySelectorAll('.card').forEach((card) => {
     const date = card.dataset.date;
-    card.querySelectorAll('.yn').forEach((yn) => {
+    card.querySelectorAll('.yn[data-q]').forEach((yn) => {
       const q = yn.dataset.q;
       yn.querySelector('.yes').addEventListener('click', () => { answers[date][q] = true; renderCheckin(); });
       yn.querySelector('.no').addEventListener('click', () => { answers[date][q] = false; renderCheckin(); });
     });
-    card.querySelector('.save').addEventListener('click', async () => {
+    card.querySelector('.save')?.addEventListener('click', () => {
       const a = answers[date];
       if (a.bedtime === null || a.food === null || a.chores === null) {
         return toast('Answer all three questions first', true);
       }
-      try {
-        await api('/api/checkin', { memberId: me.id, pin, date, bedtimeYes: a.bedtime, foodYes: a.food, choresYes: a.chores });
-        me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
-        toast('Saved! 🎉');
-        renderCheckin();
-      } catch (e) { toast(e.message, true); }
+      send(date, { bedtimeYes: a.bedtime, foodYes: a.food, choresYes: a.chores }, 'Saved! 🎉');
     });
+    card.querySelector('.vacation')?.addEventListener('click', () => send(date, { vacation: true }, '🏖️ Marked as vacation'));
+    card.querySelector('.unvacation')?.addEventListener('click', () => send(date, { clear: true }, 'Vacation removed'));
+    card.querySelector('.clearday')?.addEventListener('click', () => send(date, { clear: true }, 'Answers cleared'));
   });
 }
 
+/* ---------- History calendar ---------- */
+let histMemberId = null;
+let histMonth = null;
+let histEdit = null; // {date, bedtime, food, chores} while the admin editor is open
+
+function dayClass(day, today) {
+  if (day.preStart || day.date >= today) return 'dim'; // today isn't loggable yet
+  if (day.vacation) return 'vac';
+  const s = Object.values(day.statuses);
+  if (s.every((x) => x === 'yes')) return 'good';
+  if (s.includes('pending')) return 'pend';
+  if (s.includes('yes')) return 'part';
+  return 'bad';
+}
+
+async function renderHistory() {
+  $('#sub').textContent = 'Month at a glance';
+  histMemberId ??= me.id;
+  histMonth ??= me.today.slice(0, 7);
+  const [members, h] = await Promise.all([
+    api('/api/members'),
+    api(`/api/history?memberId=${histMemberId}&month=${histMonth}`),
+  ]);
+  const monthLabel = new Date(histMonth + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const firstDow = new Date(histMonth + '-01T00:00:00').getDay();
+  const cells = Array(firstDow).fill('<div></div>').concat(h.days.map((day) =>
+    `<div class="cal ${dayClass(day, h.today)}" data-date="${day.date}">
+       ${Number(day.date.slice(8))}${day.vacation ? '<span class="cal-ico">🏖️</span>' : ''}
+     </div>`));
+
+  view.innerHTML = `<div class="card">
+    <div class="chips">${members.map((m) =>
+      `<button class="chip ${m.id === Number(histMemberId) ? 'sel' : ''}" data-id="${m.id}">${m.name.split(' ')[0]}</button>`).join('')}</div>
+    <div class="row" style="margin:8px 0 2px">
+      <button class="linkish" id="prevMonth">←</button>
+      <b>${h.member.name} — ${monthLabel}</b>
+      <button class="linkish" id="nextMonth">→</button>
+    </div>
+    <div class="calgrid">
+      ${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => `<div class="calhead">${d}</div>`).join('')}
+      ${cells.join('')}
+    </div>
+    <p class="muted" style="margin-top:10px">
+      <span style="color:var(--green)">■</span> perfect ·
+      <span style="color:#f4a261">■</span> partial ·
+      <span style="color:var(--red)">■</span> missed ·
+      <span style="color:#4f6d9e">■</span> 🏖️ vacation ·
+      dashed = still loggable</p>
+    ${me.role === 'admin' ? '<p class="muted">👑 Tap any past day to correct it.</p><div id="dayEditor"></div>' : ''}
+  </div>`;
+
+  view.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => {
+    histMemberId = Number(c.dataset.id); histEdit = null; renderHistory();
+  }));
+  const shiftMonth = (delta) => {
+    const [y, m] = histMonth.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    histMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    histEdit = null;
+    renderHistory();
+  };
+  $('#prevMonth').addEventListener('click', () => shiftMonth(-1));
+  $('#nextMonth').addEventListener('click', () => shiftMonth(1));
+
+  if (me.role === 'admin') {
+    view.querySelectorAll('.cal[data-date]').forEach((cell) => cell.addEventListener('click', () => {
+      const day = h.days.find((x) => x.date === cell.dataset.date);
+      if (!day || day.preStart || day.date >= h.today) return;
+      histEdit = { date: day.date, ...(day.entry ?? { bedtime: null, food: null, chores: null }) };
+      renderDayEditor(h);
+    }));
+    if (histEdit && histEdit.date.startsWith(histMonth)) renderDayEditor(h);
+  }
+}
+
+function renderDayEditor(h) {
+  const ed = histEdit;
+  const yn = (q, label) => `
+    <div class="q">${label}</div>
+    <div class="yn" data-q="${q}">
+      <button class="yes ${ed[q] === true ? 'sel' : ''}">Yes</button>
+      <button class="no ${ed[q] === false ? 'sel' : ''}">No</button>
+    </div>`;
+  $('#dayEditor').innerHTML = `
+    <div style="border-top:1px solid var(--card2);margin-top:10px;padding-top:8px">
+      <b>Fixing ${h.member.name} — ${fmtFull(ed.date)}</b>
+      ${yn('bedtime', '🛏️ Bedtime')}${yn('food', '🥦 Food goal')}${yn('chores', '🧹 Chores')}
+      <button class="primary" id="edSave">Save correction</button>
+      <div class="yn" style="margin-top:8px">
+        <button id="edVacation">🏖️ Vacation day</button>
+        <button id="edClear">Clear day</button>
+      </div>
+    </div>`;
+  const sendFix = async (payload, msg) => {
+    try {
+      await api('/api/admin/checkin', { adminId: me.id, pin, memberId: Number(histMemberId), date: ed.date, ...payload });
+      histEdit = null;
+      toast(msg);
+      renderHistory();
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#dayEditor').querySelectorAll('.yn[data-q]').forEach((row) => {
+    const q = row.dataset.q;
+    row.querySelector('.yes').addEventListener('click', () => { ed[q] = true; renderDayEditor(h); });
+    row.querySelector('.no').addEventListener('click', () => { ed[q] = false; renderDayEditor(h); });
+  });
+  $('#edSave').addEventListener('click', () => {
+    if (ed.bedtime === null || ed.food === null || ed.chores === null) {
+      return toast('Answer all three questions first', true);
+    }
+    sendFix({ bedtimeYes: ed.bedtime, foodYes: ed.food, choresYes: ed.chores }, 'Corrected! 🎉');
+  });
+  $('#edVacation').addEventListener('click', () => sendFix({ vacation: true }, '🏖️ Marked as vacation'));
+  $('#edClear').addEventListener('click', () => sendFix({ clear: true }, 'Day cleared'));
+}
+
 /* ---------- Leaderboard ---------- */
+function championBanner(board) {
+  if (Number(board.today.slice(8)) > 7) return '';
+  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores;
+  const ranked = [...board.members].sort(
+    (a, b) => b.stats.lastMonth.perfect - a.stats.lastMonth.perfect || score(b) - score(a));
+  const top = ranked[0];
+  if (!top || (top.stats.lastMonth.perfect === 0 && score(top) === 0)) return '';
+  const winners = ranked
+    .filter((m) => m.stats.lastMonth.perfect === top.stats.lastMonth.perfect && score(m) === score(top))
+    .map((m) => m.name.split(' ')[0]).join(' & ');
+  const [y, mo] = board.today.split('-').map(Number);
+  const monthName = new Date(y, mo - 2, 1).toLocaleDateString('en-US', { month: 'long' });
+  return `<div class="banner">👑 ${monthName} champion: <b>${winners}</b> —
+    ${top.stats.lastMonth.perfect} perfect day${top.stats.lastMonth.perfect === 1 ? '' : 's'}! 🎉</div>`;
+}
+
 async function renderBoard() {
   $('#sub').textContent = 'Who is winning?';
   const board = await api('/api/leaderboard');
@@ -274,7 +444,7 @@ async function renderBoard() {
   const sorted = [...board.members].sort((a, b) =>
     b.stats[period].perfect - a.stats[period].perfect || score(b) - score(a));
   const medals = ['🥇', '🥈', '🥉'];
-  view.innerHTML = `<div class="card">
+  view.innerHTML = championBanner(board) + `<div class="card">
     <div class="tabs">
       ${['month', 'year', 'allTime'].map((p) =>
         `<button data-p="${p}" class="${p === period ? 'sel' : ''}">${p === 'month' ? 'This month' : p === 'year' ? 'This year' : 'All time'}</button>`).join('')}
@@ -447,6 +617,7 @@ function setTab(t) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('sel', b.dataset.tab === t));
   if (t === 'checkin') renderCheckin();
   else if (t === 'board') renderBoard();
+  else if (t === 'history') renderHistory();
   else renderProfile();
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
