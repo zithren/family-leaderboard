@@ -22,7 +22,7 @@ async function authMember(env, memberId, pin) {
   return member;
 }
 
-const PUBLIC_FIELDS = 'id, name, role, bedtime, food_rule, pin_hash IS NOT NULL AS has_pin';
+const PUBLIC_FIELDS = 'id, name, role, bedtime, food_rule, chores_rule, pin_hash IS NOT NULL AS has_pin';
 
 export async function handleApi(request, env) {
   // Every API route requires the shared family password (sent as a header,
@@ -56,7 +56,7 @@ export async function handleApi(request, env) {
       if (!member) return err('Wrong PIN', 403);
       const dates = loggableDates(today, graceDays);
       const { results: entries } = await env.DB.prepare(
-        'SELECT date, bedtime_yes, food_yes FROM checkins WHERE member_id = ? AND date >= ?'
+        'SELECT date, bedtime_yes, food_yes, chores_yes FROM checkins WHERE member_id = ? AND date >= ?'
       ).bind(member.id, dates[0]).all();
       const byDate = Object.fromEntries(entries.map((e) => [e.date, e]));
       // Clamp: SQLite's date('now') is UTC, so a freshly seeded start_date can
@@ -68,6 +68,7 @@ export async function handleApi(request, env) {
         role: member.role,
         bedtime: member.bedtime,
         food_rule: member.food_rule,
+        chores_rule: member.chores_rule,
         today,
         days: dates.filter((d) => d >= start).map((d) => ({ date: d, entry: byDate[d] ?? null })),
       });
@@ -79,18 +80,20 @@ export async function handleApi(request, env) {
       if (!member) return err('Wrong PIN', 403);
       const { date } = body;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) return err('Invalid date', 400);
-      if (date > today || date < addDays(today, -graceDays)) {
+      if (date >= today) return err('A day can be logged once it is over — come back tomorrow', 400);
+      if (date < addDays(today, -graceDays)) {
         return err(`That day can no longer be logged (grace window is ${graceDays} days)`, 400);
       }
       if (date < member.start_date) return err('Date is before your start date', 400);
-      if (typeof body.bedtimeYes !== 'boolean' || typeof body.foodYes !== 'boolean') {
-        return err('bedtimeYes and foodYes must be true or false', 400);
+      if ([body.bedtimeYes, body.foodYes, body.choresYes].some((v) => typeof v !== 'boolean')) {
+        return err('bedtimeYes, foodYes and choresYes must be true or false', 400);
       }
       await env.DB.prepare(
-        `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes) VALUES (?, ?, ?, ?)
+        `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (member_id, date) DO UPDATE SET
-           bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes, logged_at = datetime('now')`
-      ).bind(member.id, date, body.bedtimeYes ? 1 : 0, body.foodYes ? 1 : 0).run();
+           bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes,
+           chores_yes = excluded.chores_yes, logged_at = datetime('now')`
+      ).bind(member.id, date, body.bedtimeYes ? 1 : 0, body.foodYes ? 1 : 0, body.choresYes ? 1 : 0).run();
       return json({ ok: true });
     }
 
@@ -107,25 +110,44 @@ export async function handleApi(request, env) {
         await env.DB.prepare('UPDATE members SET bedtime = ? WHERE id = ?')
           .bind(body.bedtime.trim(), member.id).run();
       }
+      if (typeof body.chores === 'string' && body.chores.trim()) {
+        if (member.role === 'kid') return err('Only a parent can change your chores', 403);
+        await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
+          .bind(body.chores.trim(), member.id).run();
+      }
       return json({ ok: true });
     }
 
     if (request.method === 'POST' && path === '/api/admin/member') {
       const body = await request.json();
-      const admin = await authMember(env, body.adminId, body.pin);
-      if (!admin || admin.role !== 'admin') return err('Admin access required', 403);
+      const actor = await authMember(env, body.adminId, body.pin);
+      if (!actor || actor.role === 'kid') return err('Admin access required', 403);
       const m = body.member ?? {};
+
+      // Non-admin adults get exactly one power here: setting a kid's chores.
+      if (actor.role === 'adult') {
+        if (body.action !== 'update') return err('Admin access required', 403);
+        const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(m.id).first();
+        if (!target) return err('No such member', 404);
+        if (target.role !== 'kid') return err("Adults can only edit kids' chores", 403);
+        if (!m.chores?.trim()) return err('No chores provided', 400);
+        await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
+          .bind(m.chores.trim(), m.id).run();
+        return json({ ok: true });
+      }
 
       if (body.action === 'add') {
         if (!m.name?.trim() || !['admin', 'adult', 'kid'].includes(m.role)) {
           return err('A name and a valid role are required', 400);
         }
         await env.DB.prepare(
-          'INSERT INTO members (name, email, role, bedtime, food_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO members (name, email, role, bedtime, food_rule, chores_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         ).bind(
           m.name.trim(), m.email ?? null, m.role,
           m.bedtime?.trim() || '9:00 PM', m.foodRule?.trim() || 'junk food',
-          m.pin ? await sha256Hex(String(m.pin)) : null, today
+          m.chores?.trim() || 'daily chores',
+          m.pin ? await sha256Hex(String(m.pin)) : null,
+          addDays(today, -1)   // start yesterday so there is always a day to log
         ).run();
         return json({ ok: true });
       }
@@ -139,11 +161,13 @@ export async function handleApi(request, env) {
           role: ['admin', 'adult', 'kid'].includes(m.role) ? m.role : target.role,
           bedtime: m.bedtime?.trim() || target.bedtime,
           food_rule: m.foodRule?.trim() || target.food_rule,
-          pin_hash: m.pin ? await sha256Hex(String(m.pin)) : target.pin_hash,
+          chores_rule: m.chores?.trim() || target.chores_rule,
+          // clearPin removes the PIN entirely; otherwise a new pin replaces, blank keeps.
+          pin_hash: m.clearPin ? null : m.pin ? await sha256Hex(String(m.pin)) : target.pin_hash,
         };
         await env.DB.prepare(
-          'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, pin_hash = ? WHERE id = ?'
-        ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.pin_hash, m.id).run();
+          'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, chores_rule = ?, pin_hash = ? WHERE id = ?'
+        ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.chores_rule, updates.pin_hash, m.id).run();
         return json({ ok: true });
       }
 
@@ -161,7 +185,7 @@ export async function handleApi(request, env) {
 export async function leaderboard(env, today, graceDays) {
   const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
   const { results: entries } = await env.DB.prepare(
-    'SELECT member_id, date, bedtime_yes, food_yes FROM checkins'
+    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes FROM checkins'
   ).all();
   const byMember = new Map();
   for (const e of entries) {
@@ -176,6 +200,7 @@ export async function leaderboard(env, today, graceDays) {
       role: m.role,
       bedtime: m.bedtime,
       food_rule: m.food_rule,
+      chores_rule: m.chores_rule,
       stats: memberStats(m, byMember.get(m.id) ?? [], today, graceDays),
     })),
   };

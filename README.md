@@ -1,9 +1,9 @@
 # 🏆 Family Habit Leaderboard
 
 A zero-cost, self-hosted leaderboard for families: every day, each family member logs
-whether they **went to bed by their bedtime** and **avoided the foods they're trying to
-avoid**. The app tallies yes-days per month, year, and all-time, tracks streaks, and
-emails a weekly standings summary.
+whether they **went to bed by their bedtime**, **avoided the foods they're trying to
+avoid**, and **finished their chores**. The app tallies yes-days per month, year, and
+all-time, tracks streaks, and emails a weekly standings summary.
 
 Built for [Cloudflare Workers](https://workers.cloudflare.com/) (free tier) with a
 [D1](https://developers.cloudflare.com/d1/) SQLite database — runs comfortably free
@@ -12,9 +12,9 @@ for a family.
 ## Features
 
 - 📱 **Mobile-first web app** — each person adds it to their phone's home screen
-- 🎯 **Personal goals** — everyone has their own bedtime and their own definition of foods to avoid
-- 👨‍👩‍👧‍👦 **Roles** — the admin sets kids' bedtimes; adults manage their own; everyone owns their food goal
-- ⏳ **Grace window** — answers can be logged up to 3 days late; after that the day locks in as a "no"
+- 🎯 **Personal goals** — everyone has their own bedtime, their own definition of foods to avoid, and their own chore list (one grouped yes/no question)
+- 👨‍👩‍👧‍👦 **Roles** — the admin sets kids' bedtimes and can remove anyone's PIN; adults manage their own goals and can set kids' chores; kids own only their food goal
+- ⏳ **Grace window** — a day becomes loggable once it's over (you log *yesterday*), and stays editable for 3 days; after that it locks in as a "no"
 - 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" (both goals met)
 - 📧 **Reminders** — daily email nudge for unanswered days and a weekly leaderboard email (via [Resend](https://resend.com), free tier), both optional
 - 🔒 **Privacy** — all personal data lives only in *your* database; this repo contains none
@@ -79,9 +79,10 @@ Run the logic tests with `npm test`.
 ## How scoring works
 
 - A day counts toward the tally only when the answer was **yes**.
+- Today is never loggable — you don't know the answers until the day is over.
 - Unanswered days within the 3-day grace window are *pending* — they don't break streaks yet.
 - Unanswered days older than the grace window count as **no** (honor system, but no hoarding!).
-- "Perfect days" ⭐ = both questions answered yes on the same day. Streaks shown on the board count perfect days.
+- "Perfect days" ⭐ = all three questions answered yes on the same day. Streaks shown on the board count perfect days.
 - Days before a member's `start_date` are ignored, so late joiners aren't penalized.
 
 ## Privacy & access model

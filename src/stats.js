@@ -19,18 +19,18 @@ export function addDays(dateStr, n) {
 }
 
 /**
- * Dates that may still be logged: today back through today - graceDays.
- * (Today is loggable for early birds, but an unanswered today is never a miss.)
+ * Dates that may still be logged: yesterday back through today - graceDays.
+ * Today is excluded — you can't know the answers until the day is over.
  */
 export function loggableDates(today, graceDays) {
   const dates = [];
-  for (let i = graceDays; i >= 0; i--) dates.push(addDays(today, -i));
+  for (let i = graceDays; i >= 1; i--) dates.push(addDays(today, -i));
   return dates;
 }
 
 /**
  * Status of one question on one day.
- * entry: checkin row or undefined. key: 'bedtime_yes' | 'food_yes'.
+ * entry: checkin row or undefined. key: 'bedtime_yes' | 'food_yes' | 'chores_yes'.
  * Returns 'yes' | 'no' | 'pending' | 'future'.
  * Unanswered days older than the grace window lock in as 'no'.
  */
@@ -46,21 +46,31 @@ export function dayStatus(entry, date, today, graceDays, key) {
  * entries: array of checkin rows ({date, bedtime_yes, food_yes}).
  * Returns:
  * {
- *   month: {bedtime, food, perfect}, year: {...}, allTime: {...},
- *   streaks: {bedtime: {current, longest}, food: {...}, perfect: {...}},
+ *   month: {bedtime, food, chores, perfect}, year: {...}, allTime: {...},
+ *   streaks: {bedtime: {current, longest}, food: {...}, chores: {...}, perfect: {...}},
  *   pendingDates: [YYYY-MM-DD, ...]   // loggable days not yet answered
  * }
  */
+const QUESTION_KEYS = { bedtime: 'bedtime_yes', food: 'food_yes', chores: 'chores_yes' };
+
+/** Perfect = every question yes; any answered/locked no sinks the day. */
+function perfectStatus(statuses) {
+  if (statuses.every((s) => s === 'yes')) return 'yes';
+  if (statuses.includes('no')) return 'no';
+  return 'pending';
+}
+
 export function memberStats(member, entries, today, graceDays) {
   const byDate = new Map(entries.map((e) => [e.date, e]));
   const monthPrefix = today.slice(0, 7);
   const yearPrefix = today.slice(0, 4);
 
-  const zero = () => ({ bedtime: 0, food: 0, perfect: 0 });
+  const zero = () => ({ bedtime: 0, food: 0, chores: 0, perfect: 0 });
   const totals = { month: zero(), year: zero(), allTime: zero() };
   const streaks = {
     bedtime: { current: 0, longest: 0 },
     food: { current: 0, longest: 0 },
+    chores: { current: 0, longest: 0 },
     perfect: { current: 0, longest: 0 },
   };
   const pendingDates = [];
@@ -70,16 +80,17 @@ export function memberStats(member, entries, today, graceDays) {
 
   // Forward pass: tallies and longest streaks. Pending days neither extend
   // nor break a streak; locked-in or answered 'no' days break it.
-  const run = { bedtime: 0, food: 0, perfect: 0 };
+  const run = { bedtime: 0, food: 0, chores: 0, perfect: 0 };
   for (let d = start; d <= today; d = addDays(d, 1)) {
     const entry = byDate.get(d);
-    const bedtime = dayStatus(entry, d, today, graceDays, 'bedtime_yes');
-    const food = dayStatus(entry, d, today, graceDays, 'food_yes');
-    const perfect = bedtime === 'yes' && food === 'yes' ? 'yes' : bedtime === 'pending' || food === 'pending' ? 'pending' : 'no';
+    const statuses = Object.entries(QUESTION_KEYS).map(
+      ([name, key]) => [name, dayStatus(entry, d, today, graceDays, key)]
+    );
+    const perfect = perfectStatus(statuses.map(([, s]) => s));
 
-    if (!entry && d < today && bedtime === 'pending') pendingDates.push(d);
+    if (!entry && d < today && statuses[0][1] === 'pending') pendingDates.push(d);
 
-    for (const [key, status] of [['bedtime', bedtime], ['food', food], ['perfect', perfect]]) {
+    for (const [key, status] of [...statuses, ['perfect', perfect]]) {
       if (status === 'yes') {
         run[key]++;
         if (run[key] > streaks[key].longest) streaks[key].longest = run[key];
@@ -94,18 +105,13 @@ export function memberStats(member, entries, today, graceDays) {
   }
 
   // Backward pass: current streaks, starting from today.
-  for (const key of ['bedtime', 'food', 'perfect']) {
-    const statKey = key === 'bedtime' ? 'bedtime_yes' : key === 'food' ? 'food_yes' : null;
+  for (const key of [...Object.keys(QUESTION_KEYS), 'perfect']) {
     let count = 0;
     for (let d = today; d >= start; d = addDays(d, -1)) {
-      let status;
-      if (statKey) {
-        status = dayStatus(byDate.get(d), d, today, graceDays, statKey);
-      } else {
-        const b = dayStatus(byDate.get(d), d, today, graceDays, 'bedtime_yes');
-        const f = dayStatus(byDate.get(d), d, today, graceDays, 'food_yes');
-        status = b === 'yes' && f === 'yes' ? 'yes' : b === 'pending' || f === 'pending' ? 'pending' : 'no';
-      }
+      const entry = byDate.get(d);
+      const status = key === 'perfect'
+        ? perfectStatus(Object.values(QUESTION_KEYS).map((k) => dayStatus(entry, d, today, graceDays, k)))
+        : dayStatus(entry, d, today, graceDays, QUESTION_KEYS[key]);
       if (status === 'yes') count++;
       else if (status === 'no') break;
       // 'pending': skip and keep looking back.

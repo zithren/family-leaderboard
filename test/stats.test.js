@@ -5,15 +5,16 @@ import { addDays, loggableDates, dayStatus, memberStats } from '../src/stats.js'
 const TODAY = '2026-06-11';
 const GRACE = 3;
 const member = { start_date: '2026-06-01' };
-const entry = (date, bedtime, food) => ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0 });
+const entry = (date, bedtime, food, chores = true) =>
+  ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0, chores_yes: chores ? 1 : 0 });
 
 test('addDays crosses month boundaries', () => {
   assert.equal(addDays('2026-06-01', -1), '2026-05-31');
   assert.equal(addDays('2026-12-31', 1), '2027-01-01');
 });
 
-test('loggable window is today back through grace days', () => {
-  assert.deepEqual(loggableDates(TODAY, GRACE), ['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11']);
+test('loggable window is yesterday back through grace days; today excluded', () => {
+  assert.deepEqual(loggableDates(TODAY, GRACE), ['2026-06-08', '2026-06-09', '2026-06-10']);
 });
 
 test('unanswered day inside grace window is pending, outside locks to no', () => {
@@ -31,8 +32,22 @@ test('tallies count yes days per question and perfect days', () => {
   const s = memberStats(member, entries, TODAY, GRACE);
   assert.equal(s.month.bedtime, 2);
   assert.equal(s.month.food, 2);
+  assert.equal(s.month.chores, 3);
   assert.equal(s.month.perfect, 1);
   assert.equal(s.allTime.bedtime, 2);
+});
+
+test('a chores miss sinks the perfect day and its streak', () => {
+  const entries = [
+    entry('2026-06-09', true, true, true),
+    entry('2026-06-10', true, true, false), // chores skipped yesterday
+  ];
+  const s = memberStats(member, entries, TODAY, GRACE);
+  assert.equal(s.month.chores, 1);
+  assert.equal(s.month.perfect, 1);
+  assert.equal(s.streaks.chores.current, 0);
+  assert.equal(s.streaks.bedtime.current, 2);
+  assert.equal(s.streaks.perfect.current, 0);
 });
 
 test('days before start_date never count as misses', () => {

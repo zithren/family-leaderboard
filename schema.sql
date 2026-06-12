@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS members (
   role TEXT NOT NULL CHECK (role IN ('admin', 'adult', 'kid')),
   bedtime TEXT NOT NULL DEFAULT '9:00 PM',
   food_rule TEXT NOT NULL DEFAULT 'junk food',
+  chores_rule TEXT NOT NULL DEFAULT 'daily chores',
   pin_hash TEXT,
   push_subscription TEXT,
   -- Days before start_date never count as missed days.
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS checkins (
   date TEXT NOT NULL,            -- YYYY-MM-DD in the family timezone
   bedtime_yes INTEGER NOT NULL CHECK (bedtime_yes IN (0, 1)),
   food_yes INTEGER NOT NULL CHECK (food_yes IN (0, 1)),
+  chores_yes INTEGER NOT NULL CHECK (chores_yes IN (0, 1)),
   logged_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (member_id, date)
 );
