@@ -551,15 +551,15 @@ function renderProfile() {
   view.innerHTML = `<div class="card">
     <div class="row"><b>${esc(me.name)}</b><span class="badge">${me.role}</span></div>
     <label>🛏️ Your bedtime</label>
-    <input type="text" id="bedtime" value="${esc(me.bedtime)}" ${isKid ? 'disabled' : ''}>
+    <input type="text" id="bedtime" maxlength="100" value="${esc(me.bedtime)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your bedtime.</div>' : ''}
     <label>🥩 Food you're avoiding (your own goal)</label>
-    <input type="text" id="foodRule" value="${esc(me.food_rule)}">
+    <input type="text" id="foodRule" maxlength="500" value="${esc(me.food_rule)}">
     <label>🧹 Your chores</label>
-    <input type="text" id="chores" value="${esc(me.chores_rule)}" ${isKid ? 'disabled' : ''}>
+    <input type="text" id="chores" maxlength="500" value="${esc(me.chores_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your chores.</div>' : ''}
     <label>🌳 Your outside &amp; exercise question</label>
-    <input type="text" id="outside" value="${esc(me.outside_rule)}" ${isKid ? 'disabled' : ''}>
+    <input type="text" id="outside" maxlength="500" value="${esc(me.outside_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change this.</div>'
             : '<div class="muted" style="margin-top:4px">Shown as your daily question, e.g. "Walk Merlin" or "Met my exercise goal".</div>'}
     <label>📧 Email for reminders (optional)</label>
@@ -629,11 +629,12 @@ async function renderAdmin() {
   $('#adminList').innerHTML = members.map((m) => `
     <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
       <div class="row"><b style="color:var(--text)">${esc(m.name)}</b><span class="badge">${m.role}${m.has_pin ? ' · 🔑 PIN set' : ' · no PIN'}</span></div>
-      <label>Name</label><input type="text" class="a-name" value="${esc(m.name)}">
+      <label>Name</label><input type="text" class="a-name" maxlength="80" value="${esc(m.name)}">
       <label>Role</label>${roleSelect('a-role', m.role)}
-      <label>Bedtime</label><input type="text" class="a-bedtime" value="${esc(m.bedtime)}">
-      <label>Chores</label><input type="text" class="a-chores" value="${esc(m.chores_rule)}">
-      <label>Outside &amp; exercise question</label><input type="text" class="a-outside" value="${esc(m.outside_rule)}">
+      <label>Bedtime</label><input type="text" class="a-bedtime" maxlength="100" value="${esc(m.bedtime)}">
+      <label>Food goal</label><input type="text" class="a-food" maxlength="500" value="${esc(m.food_rule)}">
+      <label>Chores</label><input type="text" class="a-chores" maxlength="500" value="${esc(m.chores_rule)}">
+      <label>Outside &amp; exercise question</label><input type="text" class="a-outside" maxlength="500" value="${esc(m.outside_rule)}">
       <label>Email for reminders (blank = none)</label><input type="email" class="a-email" value="${esc(m.email ?? '')}" placeholder="them@example.com">
       <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••" autocomplete="off">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
@@ -647,9 +648,10 @@ async function renderAdmin() {
       <b style="color:var(--text)">➕ Add a member</b>
       <label>Name</label><input type="text" id="add-name" placeholder="Name">
       <label>Role</label>${roleSelect('add-role', 'kid')}
-      <label>Bedtime</label><input type="text" id="add-bedtime" placeholder="9:00 PM">
-      <label>Chores</label><input type="text" id="add-chores" placeholder="daily chores">
-      <label>Outside &amp; exercise question</label><input type="text" id="add-outside" placeholder="Went outside for 30+ minutes">
+      <label>Bedtime</label><input type="text" id="add-bedtime" maxlength="100" placeholder="9:00 PM">
+      <label>Food goal</label><input type="text" id="add-food" maxlength="500" placeholder="no junk food">
+      <label>Chores</label><input type="text" id="add-chores" maxlength="500" placeholder="daily chores">
+      <label>Outside &amp; exercise question</label><input type="text" id="add-outside" maxlength="500" placeholder="Went outside for 30+ minutes">
       <label>PIN (optional)</label><input type="text" id="add-pin" inputmode="numeric" placeholder="leave blank for no PIN">
       <button class="primary" id="a-add">Add member</button>
     </div>`;
@@ -664,6 +666,7 @@ async function renderAdmin() {
             name: row.querySelector('.a-name').value,
             role: row.querySelector('.a-role').value,
             bedtime: row.querySelector('.a-bedtime').value,
+            foodRule: row.querySelector('.a-food').value,
             chores: row.querySelector('.a-chores').value,
             outside: row.querySelector('.a-outside').value,
             email: row.querySelector('.a-email').value.trim() || null,
@@ -696,6 +699,7 @@ async function renderAdmin() {
           name: $('#add-name').value,
           role: document.querySelector('.add-role').value,
           bedtime: $('#add-bedtime').value || undefined,
+          foodRule: $('#add-food').value || undefined,
           chores: $('#add-chores').value || undefined,
           outside: $('#add-outside').value || undefined,
           pin: $('#add-pin').value || undefined,

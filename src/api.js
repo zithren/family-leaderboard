@@ -45,15 +45,26 @@ async function authMember(env, memberId, pin, ip) {
 }
 
 /** Field length caps — generous for humans, hostile to pranks. */
-const LIMITS = { name: 50, bedtime: 40, rule: 200, email: 254, pin: 12, password: 100, push: 4096 };
+const LIMITS = { name: 80, bedtime: 100, rule: 500, email: 254, pin: 12, password: 100, push: 4096 };
 const tooLong = (s, n) => typeof s === 'string' && s.length > n;
 
-/** Length-check the member fields accepted by the admin add/update routes. */
-const badMemberFields = (m) =>
-  tooLong(m.name, LIMITS.name) || tooLong(m.bedtime, LIMITS.bedtime) ||
-  tooLong(m.foodRule, LIMITS.rule) || tooLong(m.chores, LIMITS.rule) ||
-  tooLong(m.outside, LIMITS.rule) ||
-  tooLong(m.email, LIMITS.email) || tooLong(String(m.pin ?? ''), LIMITS.pin);
+/** Length-check the member fields accepted by the admin add/update routes.
+ *  Returns an error message naming the offending field, or null. */
+function memberFieldError(m) {
+  const checks = [
+    [m.name, LIMITS.name, 'name'],
+    [m.bedtime, LIMITS.bedtime, 'bedtime'],
+    [m.foodRule, LIMITS.rule, 'food goal'],
+    [m.chores, LIMITS.rule, 'chores list'],
+    [m.outside, LIMITS.rule, 'outside & exercise question'],
+    [m.email, LIMITS.email, 'email'],
+    [String(m.pin ?? ''), LIMITS.pin, 'PIN'],
+  ];
+  for (const [value, limit, label] of checks) {
+    if (tooLong(value, limit)) return `The ${label} is too long (max ${limit} characters)`;
+  }
+  return null;
+}
 
 // Visible to anyone past the family-password gate (i.e. the family).
 const PUBLIC_FIELDS = 'id, name, email, role, bedtime, food_rule, chores_rule, outside_rule, pin_hash IS NOT NULL AS has_pin';
@@ -168,10 +179,10 @@ export async function handleApi(request, env) {
       const bedtime = typeof body.bedtime === 'string' ? body.bedtime.trim() : null;
       const chores = typeof body.chores === 'string' ? body.chores.trim() : null;
       const outside = typeof body.outside === 'string' ? body.outside.trim() : null;
-      if (tooLong(foodRule, LIMITS.rule) || tooLong(chores, LIMITS.rule) ||
-          tooLong(outside, LIMITS.rule) || tooLong(bedtime, LIMITS.bedtime)) {
-        return err('That text is too long', 400);
-      }
+      if (tooLong(foodRule, LIMITS.rule)) return err(`Your food goal is too long (max ${LIMITS.rule} characters)`, 400);
+      if (tooLong(chores, LIMITS.rule)) return err(`Your chores text is too long (max ${LIMITS.rule} characters)`, 400);
+      if (tooLong(outside, LIMITS.rule)) return err(`Your outside & exercise question is too long (max ${LIMITS.rule} characters)`, 400);
+      if (tooLong(bedtime, LIMITS.bedtime)) return err(`Your bedtime is too long (max ${LIMITS.bedtime} characters)`, 400);
       if (bedtime && member.role === 'kid') return err('Only a parent can change your bedtime', 403);
       if (chores && member.role === 'kid') return err('Only a parent can change your chores', 403);
       if (outside && member.role === 'kid') return err('Only a parent can change your outside goal', 403);
@@ -297,7 +308,8 @@ export async function handleApi(request, env) {
       // through /api/profile; kids' goals are admin-set.
       if (actor.role !== 'admin') return err('Admin access required', 403);
 
-      if (badMemberFields(m)) return err('One of those fields is too long', 400);
+      const fieldError = memberFieldError(m);
+      if (fieldError) return err(fieldError, 400);
 
       if (body.action === 'add') {
         if (!m.name?.trim() || !['admin', 'adult', 'kid'].includes(m.role)) {
