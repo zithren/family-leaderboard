@@ -152,9 +152,27 @@ export async function handleApi(request, env) {
         return json({ ok: true });
       }
 
+      if (body.action === 'delete') {
+        const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(m.id).first();
+        if (!target) return err('No such member', 404);
+        if (target.role === 'admin' && (await adminCount(env)) <= 1) {
+          return err('Cannot remove the only admin', 400);
+        }
+        await env.DB.prepare('DELETE FROM checkins WHERE member_id = ?').bind(m.id).run();
+        await env.DB.prepare('DELETE FROM members WHERE id = ?').bind(m.id).run();
+        return json({ ok: true });
+      }
+
       if (body.action === 'update') {
         const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(m.id).first();
         if (!target) return err('No such member', 404);
+        if (
+          target.role === 'admin' &&
+          ['adult', 'kid'].includes(m.role) &&
+          (await adminCount(env)) <= 1
+        ) {
+          return err('Cannot demote the only admin', 400);
+        }
         const updates = {
           name: m.name?.trim() || target.name,
           email: m.email !== undefined ? m.email : target.email,
@@ -179,6 +197,11 @@ export async function handleApi(request, env) {
     if (e instanceof SyntaxError) return err('Invalid JSON body', 400);
     throw e;
   }
+}
+
+async function adminCount(env) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM members WHERE role = 'admin'").first();
+  return row.cnt;
 }
 
 /** Leaderboard data for every member; also used by the weekly summary email. */

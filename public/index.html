@@ -31,6 +31,7 @@
   }
   button:active { transform: scale(.97); }
   .primary { background: var(--accent); color: #1a1a2e; font-weight: 700; width: 100%; margin-top: 12px; }
+  .danger { background: none; color: var(--red); border: 1px solid var(--red); width: 100%; margin-top: 8px; }
   .member-btn { display: block; width: 100%; margin: 8px 0; font-size: 1.1rem; text-align: left; padding: 16px; }
   .pin-input {
     font-size: 1.6rem; letter-spacing: .5em; text-align: center; width: 100%;
@@ -334,11 +335,17 @@ function renderProfile() {
   else if (me.role === 'adult') renderKidChores();
 }
 
+const roleSelect = (cls, selected) => `<select class="${cls}">
+  ${['admin', 'adult', 'kid'].map((r) => `<option value="${r}" ${r === selected ? 'selected' : ''}>${r}</option>`).join('')}
+</select>`;
+
 async function renderAdmin() {
   const members = await api('/api/members');
   $('#adminList').innerHTML = members.map((m) => `
     <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
       <div class="row"><b style="color:var(--text)">${m.name}</b><span class="badge">${m.role}${m.has_pin ? ' · 🔑 PIN set' : ' · no PIN'}</span></div>
+      <label>Name</label><input type="text" class="a-name" value="${m.name}">
+      <label>Role</label>${roleSelect('a-role', m.role)}
       <label>Bedtime</label><input type="text" class="a-bedtime" value="${m.bedtime}">
       <label>Chores</label><input type="text" class="a-chores" value="${m.chores_rule}">
       <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••">
@@ -347,7 +354,18 @@ async function renderAdmin() {
         No PIN — ${m.name.split(' ')[0]} logs in with one tap
       </label>
       <button class="primary a-save" style="margin-top:8px">Update ${m.name.split(' ')[0]}</button>
-    </div>`).join('');
+      <button class="danger a-remove">Remove ${m.name.split(' ')[0]}…</button>
+    </div>`).join('') + `
+    <div style="border-top:1px solid var(--card2);padding:12px 0">
+      <b style="color:var(--text)">➕ Add a member</b>
+      <label>Name</label><input type="text" id="add-name" placeholder="Name">
+      <label>Role</label>${roleSelect('add-role', 'kid')}
+      <label>Bedtime</label><input type="text" id="add-bedtime" placeholder="9:00 PM">
+      <label>Chores</label><input type="text" id="add-chores" placeholder="daily chores">
+      <label>PIN (optional)</label><input type="text" id="add-pin" inputmode="numeric" placeholder="leave blank for no PIN">
+      <button class="primary" id="a-add">Add member</button>
+    </div>`;
+
   $('#adminList').querySelectorAll('[data-id]').forEach((row) => {
     row.querySelector('.a-save').addEventListener('click', async () => {
       try {
@@ -355,6 +373,8 @@ async function renderAdmin() {
           adminId: me.id, pin, action: 'update',
           member: {
             id: Number(row.dataset.id),
+            name: row.querySelector('.a-name').value,
+            role: row.querySelector('.a-role').value,
             bedtime: row.querySelector('.a-bedtime').value,
             chores: row.querySelector('.a-chores').value,
             pin: row.querySelector('.a-pin').value || undefined,
@@ -365,6 +385,35 @@ async function renderAdmin() {
         renderAdmin();
       } catch (e) { toast(e.message, true); }
     });
+    row.querySelector('.a-remove').addEventListener('click', async () => {
+      const name = row.querySelector('.a-name').value;
+      if (!confirm(`Remove ${name} and all their check-ins? This cannot be undone.`)) return;
+      try {
+        await api('/api/admin/member', {
+          adminId: me.id, pin, action: 'delete',
+          member: { id: Number(row.dataset.id) },
+        });
+        toast(`${name} removed`);
+        renderAdmin();
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+  $('#a-add').addEventListener('click', async () => {
+    try {
+      await api('/api/admin/member', {
+        adminId: me.id, pin, action: 'add',
+        member: {
+          name: $('#add-name').value,
+          role: document.querySelector('.add-role').value,
+          bedtime: $('#add-bedtime').value || undefined,
+          foodRule: undefined,
+          chores: $('#add-chores').value || undefined,
+          pin: $('#add-pin').value || undefined,
+        },
+      });
+      toast('Added! 🎉');
+      renderAdmin();
+    } catch (e) { toast(e.message, true); }
   });
 }
 
