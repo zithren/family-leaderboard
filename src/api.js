@@ -23,14 +23,36 @@ async function readBody(request) {
   }
 }
 
-/** Look up a member and verify their PIN. Returns the row, or null if denied. */
-async function authMember(env, memberId, pin) {
-  const member = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(memberId).first();
+/**
+ * Look up a member and verify their PIN. Returns the row, or null if denied.
+ * Failed PIN attempts count toward the same per-IP rate limit as failed
+ * family passwords, so PINs can't be brute-forced from inside the gate.
+ */
+async function authMember(env, memberId, pin, ip) {
+  const id = Number(memberId);
+  if (!Number.isInteger(id) || id < 1) return null;
+  const member = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(id).first();
   if (!member) return null;
   if (!member.pin_hash) return member;
-  if (!pin || (await sha256Hex(String(pin))) !== member.pin_hash) return null;
+  if (!pin || (await sha256Hex(String(pin))) !== member.pin_hash) {
+    if (ip) {
+      await env.DB.prepare('INSERT INTO auth_failures (ip, ts) VALUES (?, ?)')
+        .bind(ip, Math.floor(Date.now() / 1000)).run();
+    }
+    return null;
+  }
   return member;
 }
+
+/** Field length caps — generous for humans, hostile to pranks. */
+const LIMITS = { name: 50, bedtime: 40, rule: 200, email: 254, pin: 12, password: 100, push: 4096 };
+const tooLong = (s, n) => typeof s === 'string' && s.length > n;
+
+/** Length-check the member fields accepted by the admin add/update routes. */
+const badMemberFields = (m) =>
+  tooLong(m.name, LIMITS.name) || tooLong(m.bedtime, LIMITS.bedtime) ||
+  tooLong(m.foodRule, LIMITS.rule) || tooLong(m.chores, LIMITS.rule) ||
+  tooLong(m.email, LIMITS.email) || tooLong(String(m.pin ?? ''), LIMITS.pin);
 
 // Visible to anyone past the family-password gate (i.e. the family).
 const PUBLIC_FIELDS = 'id, name, email, role, bedtime, food_rule, chores_rule, pin_hash IS NOT NULL AS has_pin';
@@ -82,7 +104,11 @@ export async function handleApi(request, env) {
     }
 
     if (request.method === 'GET' && path === '/api/me') {
-      const member = await authMember(env, url.searchParams.get('memberId'), url.searchParams.get('pin'));
+      // PIN arrives as a header (preferred — keeps it out of URLs/logs) or query param.
+      const member = await authMember(
+        env, url.searchParams.get('memberId'),
+        request.headers.get('X-Member-Pin') ?? url.searchParams.get('pin'), ip
+      );
       if (!member) return err('Wrong PIN', 403);
       const dates = loggableDates(today, graceDays);
       const { results: entries } = await env.DB.prepare(
@@ -109,7 +135,7 @@ export async function handleApi(request, env) {
     if (request.method === 'POST' && path === '/api/checkin') {
       const body = await readBody(request);
       if (!body) return err('Invalid request body', 400);
-      const member = await authMember(env, body.memberId, body.pin);
+      const member = await authMember(env, body.memberId, body.pin, ip);
       if (!member) return err('Wrong PIN', 403);
       const { date } = body;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) return err('Invalid date', 400);
@@ -124,7 +150,7 @@ export async function handleApi(request, env) {
     if (request.method === 'POST' && path === '/api/profile') {
       const body = await readBody(request);
       if (!body) return err('Invalid request body', 400);
-      const member = await authMember(env, body.memberId, body.pin);
+      const member = await authMember(env, body.memberId, body.pin, ip);
       if (!member) return err('Wrong PIN', 403);
 
       // Validate everything before writing anything, so a rejected field
@@ -132,18 +158,24 @@ export async function handleApi(request, env) {
       const foodRule = typeof body.foodRule === 'string' ? body.foodRule.trim() : null;
       const bedtime = typeof body.bedtime === 'string' ? body.bedtime.trim() : null;
       const chores = typeof body.chores === 'string' ? body.chores.trim() : null;
+      if (tooLong(foodRule, LIMITS.rule) || tooLong(chores, LIMITS.rule) || tooLong(bedtime, LIMITS.bedtime)) {
+        return err('That text is too long', 400);
+      }
       if (bedtime && member.role === 'kid') return err('Only a parent can change your bedtime', 403);
       if (chores && member.role === 'kid') return err('Only a parent can change your chores', 403);
       let email;
       if (typeof body.email === 'string') {
         email = body.email.trim();
-        if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right', 400);
+        if (email && (email.length > LIMITS.email || !/^\S+@\S+\.\S+$/.test(email))) {
+          return err('That email does not look right', 400);
+        }
       }
       let pushValue;
       if ('pushSubscription' in body) {
         pushValue = null;
         if (body.pushSubscription) {
           try {
+            if (body.pushSubscription.length > LIMITS.push) throw new Error();
             const endpoint = JSON.parse(body.pushSubscription)?.endpoint;
             if (!endpoint || !endpoint.startsWith('https://')) throw new Error();
             pushValue = body.pushSubscription;
@@ -176,10 +208,11 @@ export async function handleApi(request, env) {
     if (request.method === 'POST' && path === '/api/admin/familykey') {
       const body = await readBody(request);
       if (!body) return err('Invalid request body', 400);
-      const actor = await authMember(env, body.adminId, body.pin);
+      const actor = await authMember(env, body.adminId, body.pin, ip);
       if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
       const newKey = String(body.newKey ?? '');
       if (newKey.length < 6) return err('Family password must be at least 6 characters', 400);
+      if (newKey.length > LIMITS.password) return err('Family password is too long', 400);
       await env.DB.prepare(
         "INSERT INTO settings (key, value) VALUES ('family_key_hash', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"
       ).bind(await sha256Hex(newKey)).run();
@@ -190,7 +223,7 @@ export async function handleApi(request, env) {
     if (request.method === 'POST' && path === '/api/admin/checkin') {
       const body = await readBody(request);
       if (!body) return err('Invalid request body', 400);
-      const actor = await authMember(env, body.adminId, body.pin);
+      const actor = await authMember(env, body.adminId, body.pin, ip);
       if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
       const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(body.memberId).first();
       if (!target) return err('No such member', 404);
@@ -241,7 +274,7 @@ export async function handleApi(request, env) {
     if (request.method === 'POST' && path === '/api/admin/member') {
       const body = await readBody(request);
       if (!body) return err('Invalid request body', 400);
-      const actor = await authMember(env, body.adminId, body.pin);
+      const actor = await authMember(env, body.adminId, body.pin, ip);
       if (!actor || actor.role === 'kid') return err('Admin access required', 403);
       const m = body.member ?? {};
 
@@ -252,24 +285,32 @@ export async function handleApi(request, env) {
         if (!target) return err('No such member', 404);
         if (target.role !== 'kid') return err("Adults can only edit kids' chores", 403);
         if (!m.chores?.trim()) return err('No chores provided', 400);
+        if (tooLong(m.chores, LIMITS.rule)) return err('That text is too long', 400);
         await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
           .bind(m.chores.trim(), m.id).run();
         return json({ ok: true });
       }
 
+      if (badMemberFields(m)) return err('One of those fields is too long', 400);
+
       if (body.action === 'add') {
         if (!m.name?.trim() || !['admin', 'adult', 'kid'].includes(m.role)) {
           return err('A name and a valid role are required', 400);
         }
-        await env.DB.prepare(
-          'INSERT INTO members (name, email, role, bedtime, food_rule, chores_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        ).bind(
-          m.name.trim(), m.email ?? null, m.role,
-          m.bedtime?.trim() || '9:00 PM', m.foodRule?.trim() || 'junk food',
-          m.chores?.trim() || 'daily chores',
-          m.pin ? await sha256Hex(String(m.pin)) : null,
-          addDays(today, -graceDays)   // open the full grace window from day one
-        ).run();
+        try {
+          await env.DB.prepare(
+            'INSERT INTO members (name, email, role, bedtime, food_rule, chores_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          ).bind(
+            m.name.trim(), m.email ?? null, m.role,
+            m.bedtime?.trim() || '9:00 PM', m.foodRule?.trim() || 'junk food',
+            m.chores?.trim() || 'daily chores',
+            m.pin ? await sha256Hex(String(m.pin)) : null,
+            addDays(today, -graceDays)   // open the full grace window from day one
+          ).run();
+        } catch (e) {
+          if (String(e.message).includes('UNIQUE')) return err('That name is already taken', 400);
+          throw e;
+        }
         return json({ ok: true });
       }
 
@@ -304,9 +345,14 @@ export async function handleApi(request, env) {
           // clearPin removes the PIN entirely; otherwise a new pin replaces, blank keeps.
           pin_hash: m.clearPin ? null : m.pin ? await sha256Hex(String(m.pin)) : target.pin_hash,
         };
-        await env.DB.prepare(
-          'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, chores_rule = ?, pin_hash = ? WHERE id = ?'
-        ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.chores_rule, updates.pin_hash, m.id).run();
+        try {
+          await env.DB.prepare(
+            'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, chores_rule = ?, pin_hash = ? WHERE id = ?'
+          ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.chores_rule, updates.pin_hash, m.id).run();
+        } catch (e) {
+          if (String(e.message).includes('UNIQUE')) return err('That name is already taken', 400);
+          throw e;
+        }
         return json({ ok: true });
       }
 

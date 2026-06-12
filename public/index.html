@@ -136,9 +136,13 @@ function toast(msg, isError = false) {
   setTimeout(() => (t.className = 'toast'), 2200);
 }
 
-async function api(path, opts) {
+async function api(path, opts, pinOverride) {
   const res = await fetch(path, {
-    headers: { 'X-Family-Key': familyKey, ...(opts && { 'Content-Type': 'application/json' }) },
+    headers: {
+      'X-Family-Key': familyKey,
+      'X-Member-Pin': pinOverride ?? pin,
+      ...(opts && { 'Content-Type': 'application/json' }),
+    },
     ...(opts && { method: 'POST', body: JSON.stringify(opts) }),
   });
   const data = await res.json();
@@ -214,7 +218,7 @@ async function showLogin(preselect) {
 
 async function login(id, pinValue, { silent = false } = {}) {
   try {
-    me = await api(`/api/me?memberId=${id}&pin=${encodeURIComponent(pinValue)}`);
+    me = await api(`/api/me?memberId=${id}`, null, pinValue);
     memberId = id; pin = pinValue;
     localStorage.setItem('memberId', id);
     localStorage.setItem('pin', pinValue);
@@ -293,7 +297,7 @@ function renderCheckin() {
   const send = async (date, payload, msg) => {
     try {
       await api('/api/checkin', { memberId: me.id, pin, date, ...payload });
-      me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+      me = await api(`/api/me?memberId=${me.id}`);
       delete answers[date];
       toast(msg);
       renderCheckin();
@@ -512,7 +516,8 @@ function renderProfile() {
     <button id="pushToggle" style="width:100%">${me.push ? 'On — tap to turn off' : 'Off — tap to turn on'}</button>
     <div class="muted" id="pushHint" style="margin-top:4px">A daily nudge when you have days left to log. Your phone will ask permission first.</div>
     <button class="primary" id="saveProfile">Save settings</button>
-    <button class="linkish" id="logout" style="margin-top:8px">Switch person</button>
+    <button class="linkish" id="logout" style="margin-top:8px">👤 Log out (switch person)</button>
+    <button class="linkish" id="lockDevice">🔒 Lock this device (forget family password)</button>
   </div>
   ${me.role === 'admin'
     ? `<div class="card"><b>👑 Admin: manage family</b><div id="adminList" class="muted" style="margin-top:8px">Loading…</div></div>
@@ -537,11 +542,16 @@ function renderProfile() {
         email: $('#email').value,
         ...(isKid ? {} : { bedtime: $('#bedtime').value, chores: $('#chores').value }),
       });
-      me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+      me = await api(`/api/me?memberId=${me.id}`);
       toast('Saved! 🎉');
     } catch (e) { toast(e.message, true); }
   });
   $('#logout').addEventListener('click', logout);
+  $('#lockDevice').addEventListener('click', () => {
+    localStorage.clear();
+    me = null; memberId = ''; pin = ''; familyKey = '';
+    showGate();
+  });
   $('#pushToggle').addEventListener('click', () => (me.push ? disablePush() : enablePush()));
   if (me.role === 'admin') {
     $('#fkForm').addEventListener('submit', async (ev) => {
@@ -645,7 +655,7 @@ async function renderAdmin() {
 
 /* ---------- Push reminders (per device, opt-in) ---------- */
 async function refreshMe() {
-  me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+  me = await api(`/api/me?memberId=${me.id}`);
 }
 
 async function enablePush() {
