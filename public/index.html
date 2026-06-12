@@ -84,6 +84,7 @@
   .cal.pend { background: none; border: 1px dashed var(--muted); color: var(--muted); }
   .cal.vac { background: #4f6d9e; color: #fff; }
   .cal.dim { background: none; color: var(--card2); }
+  .cal.editing { outline: 3px solid var(--accent); outline-offset: 1px; }
   .cal-ico { font-size: .6rem; line-height: 1; }
   .banner {
     background: linear-gradient(135deg, #b8860b, #ffd166); color: #1a1a2e;
@@ -375,11 +376,19 @@ async function renderHistory() {
   if (me.role === 'admin') {
     view.querySelectorAll('.cal[data-date]').forEach((cell) => cell.addEventListener('click', () => {
       const day = h.days.find((x) => x.date === cell.dataset.date);
-      if (!day || day.preStart || day.date >= h.today) return;
+      if (!day) return;
+      if (day.preStart) return toast(`That's before ${h.member.name} joined`, true);
+      if (day.date >= h.today) return toast("That day isn't over yet", true);
       histEdit = { date: day.date, ...(day.entry ?? { bedtime: null, food: null, chores: null, outside: null }) };
+      view.querySelectorAll('.cal.editing').forEach((c) => c.classList.remove('editing'));
+      cell.classList.add('editing');
       renderDayEditor(h);
+      $('#dayEditor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }));
-    if (histEdit && histEdit.date.startsWith(histMonth)) renderDayEditor(h);
+    if (histEdit && histEdit.date.startsWith(histMonth)) {
+      view.querySelector(`.cal[data-date="${histEdit.date}"]`)?.classList.add('editing');
+      renderDayEditor(h);
+    }
   }
 }
 
