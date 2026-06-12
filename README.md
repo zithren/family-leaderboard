@@ -1,9 +1,10 @@
 # 🏆 Family Habit Leaderboard
 
 A zero-cost, self-hosted leaderboard for families: every day, each family member logs
-whether they **went to bed by their bedtime**, **avoided the foods they're trying to
-avoid**, and **finished their chores**. The app tallies yes-days per month, year, and
-all-time, tracks streaks, and emails a weekly standings summary.
+four yes/no questions — **in bed by their bedtime**, **stuck to their food goal**,
+**finished their chores**, and **met their outside/exercise goal**. The app tallies
+yes-days per month, year, and all-time, tracks streaks, crowns monthly award winners,
+and emails a weekly standings summary.
 
 Built for [Cloudflare Workers](https://workers.cloudflare.com/) (free tier) with a
 [D1](https://developers.cloudflare.com/d1/) SQLite database — runs comfortably free
@@ -12,14 +13,13 @@ for a family.
 ## Features
 
 - 📱 **Mobile-first web app** — each person adds it to their phone's home screen
-- 🎯 **Personal goals** — everyone has their own bedtime, their own definition of foods to avoid, and their own chore list (one grouped yes/no question)
-- 👨‍👩‍👧‍👦 **Roles** — the admin sets kids' bedtimes and can remove anyone's PIN; adults manage their own goals and can set kids' chores; kids own only their food goal
+- 🎯 **Personal goals** — everyone has their own bedtime, food rule, chore list, and a fully custom outside/exercise question ("Walk the dog", "Met my exercise goal", …)
+- 👨‍👩‍👧‍👦 **Roles** — the admin manages everyone (members, roles, PINs, all goals, the family password); adults manage their own goals; kids own only their food goal
 - ⏳ **Grace window** — a day becomes loggable once it's over (you log *yesterday*), and stays editable for 3 days; after that it locks in as a "no"
-- 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" (all three goals met)
-- 🏖️ **Vacation days** — mark a day as not counting (travel, sleepovers, holidays); it neither breaks streaks nor adds to tallies
-- 📅 **History calendar** — month-at-a-glance per person: perfect, partial, missed, vacation, and still-loggable days
-- 👑 **Admin corrections** — the admin can tap any past day in the calendar to fix it, even beyond the grace window
-- 🏆 **Monthly champion** — a banner during the first week of each month (and an email on the 1st) crowns last month's winner
+- 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" ⭐ (all four goals met)
+- 👑 **Monthly awards** — the board shows last month's winners per category (each question, most perfect days, longest streak) plus a browsable award history; a champion banner and email land on the 1st
+- ✈️ **Away days** — the admin can mark a day as not counting (travel, sleepovers); it neither breaks streaks nor adds to tallies
+- 📅 **History calendar** — month-at-a-glance per person: perfect, partial, missed, away, and still-loggable days; the admin taps any past day to correct it, even beyond the grace window
 - 📧 **Reminders** — daily email nudge for unanswered days and a weekly leaderboard email (via [Resend](https://resend.com), free tier), both optional
 - 🔔 **Push reminders** — per-device opt-in from each profile (Web Push, free); on iPhone the app must be added to the Home Screen first
 - 🔒 **Privacy** — all personal data lives only in *your* database; this repo contains none
@@ -60,6 +60,8 @@ Run the logic tests with `npm test`.
    echo -n "your-family-password" | shasum -a 256   # copy the hex
    npx wrangler secret put FAMILY_KEY_HASH           # paste the hex
    ```
+   The admin can change the password later from inside the app (Profile →
+   Change family password); the in-app value overrides this secret.
 5. Set your timezone in `wrangler.toml` (`FAMILY_TZ`), then:
    ```sh
    npm run db:schema:remote
@@ -102,8 +104,9 @@ Run the logic tests with `npm test`.
 - Today is never loggable — you don't know the answers until the day is over.
 - Unanswered days within the 3-day grace window are *pending* — they don't break streaks yet.
 - Unanswered days older than the grace window count as **no** (honor system, but no hoarding!).
-- "Perfect days" ⭐ = all three questions answered yes on the same day. Streaks shown on the board count perfect days.
-- Days before a member's `start_date` are ignored, so late joiners aren't penalized.
+- "Perfect days" ⭐ = all four questions answered yes on the same day. Streaks shown on the board count perfect days.
+- Away days (admin-set) count for nothing and against nothing — streaks carry across them.
+- Days before a member's `start_date` are ignored, so late joiners aren't penalized. New members start "yesterday", so there's always a card to log on day one.
 
 ## Privacy & access model
 
@@ -117,12 +120,19 @@ Run the logic tests with `npm test`.
   contains no personal data, is marked `noindex`, and `robots.txt` blocks crawlers.
 - **Database**: D1 is only reachable through the Worker; there is no public endpoint.
   Traffic is HTTPS end to end.
+- **Rate limiting**: 20 failed password or PIN attempts from one IP in 10 minutes
+  locks that IP out, so neither the family password nor 4-digit PINs can be
+  brute-forced. All member-entered text is HTML-escaped, length-capped, and
+  validated server-side.
 - **PINs** distinguish family members from each other (sibling-proofing); the family
   password keeps outsiders away. Both are stored as SHA-256 hashes, suitable for a
   family scoreboard — this is deliberately not bank-grade auth. If you want stronger
   protection, put the Worker behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
   (free for up to 50 users) for email-verified logins.
+- **Password managers**: the lock screen and change-password fields use standard
+  `autocomplete` hints, so Apple Passwords / 1Password / Bitwarden offer to save
+  and autofill the family password.
 
 ## License
 
-MIT
+[MIT](LICENSE)
