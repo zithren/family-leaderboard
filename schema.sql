@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS members (
   bedtime TEXT NOT NULL DEFAULT '9:00 PM',
   food_rule TEXT NOT NULL DEFAULT 'junk food',
   chores_rule TEXT NOT NULL DEFAULT 'daily chores',
+  -- The outside/exercise question, stored as the question text itself,
+  -- e.g. "Went outside for 30+ minutes" or "Walk Merlin".
+  outside_rule TEXT NOT NULL DEFAULT 'Went outside for 30+ minutes',
   pin_hash TEXT,
   push_subscription TEXT,
   -- Days before start_date never count as missed days.

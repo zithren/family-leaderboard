@@ -28,6 +28,40 @@ export function loggableDates(today, graceDays) {
   return dates;
 }
 
+/**
+ * One member's totals within a single month (YYYY-MM), for awards:
+ * yes-count per question, perfect-day count, and the longest run of
+ * consecutive perfect days inside that month (pending/skip days bridge).
+ */
+export function monthTotals(member, entries, month, today, graceDays) {
+  const byDate = new Map(entries.map((e) => [e.date, e]));
+  const [y, m] = month.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const totals = { bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0, longestRun: 0 };
+  let run = 0;
+  for (let i = 1; i <= lastDay; i++) {
+    const d = `${month}-${String(i).padStart(2, '0')}`;
+    if (d < member.start_date || d > today) continue;
+    const entry = byDate.get(d);
+    const statuses = Object.entries(QUESTION_KEYS).map(
+      ([name, key]) => [name, dayStatus(entry, d, today, graceDays, key)]
+    );
+    for (const [name, status] of statuses) {
+      if (status === 'yes') totals[name]++;
+    }
+    const perfect = perfectStatus(statuses.map(([, s]) => s));
+    if (perfect === 'yes') {
+      totals.perfect++;
+      run++;
+      if (run > totals.longestRun) totals.longestRun = run;
+    } else if (perfect === 'no') {
+      run = 0;
+    }
+    // pending/skip: the run carries over.
+  }
+  return totals;
+}
+
 /** The YYYY-MM prefix of the month before the given date's month. */
 export function prevMonthPrefix(today) {
   const [y, m] = today.split('-').map(Number);

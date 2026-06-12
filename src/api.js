@@ -1,4 +1,4 @@
-import { todayInTZ, addDays, loggableDates, memberStats, dayStatus } from './stats.js';
+import { todayInTZ, addDays, loggableDates, memberStats, monthTotals, dayStatus } from './stats.js';
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -52,10 +52,11 @@ const tooLong = (s, n) => typeof s === 'string' && s.length > n;
 const badMemberFields = (m) =>
   tooLong(m.name, LIMITS.name) || tooLong(m.bedtime, LIMITS.bedtime) ||
   tooLong(m.foodRule, LIMITS.rule) || tooLong(m.chores, LIMITS.rule) ||
+  tooLong(m.outside, LIMITS.rule) ||
   tooLong(m.email, LIMITS.email) || tooLong(String(m.pin ?? ''), LIMITS.pin);
 
 // Visible to anyone past the family-password gate (i.e. the family).
-const PUBLIC_FIELDS = 'id, name, email, role, bedtime, food_rule, chores_rule, pin_hash IS NOT NULL AS has_pin';
+const PUBLIC_FIELDS = 'id, name, email, role, bedtime, food_rule, chores_rule, outside_rule, pin_hash IS NOT NULL AS has_pin';
 
 export async function handleApi(request, env) {
   // Every API route requires the shared family password. The hash lives in
@@ -103,6 +104,13 @@ export async function handleApi(request, env) {
       return json({ publicKey: env.VAPID_PUBLIC_KEY ?? null });
     }
 
+    // Monthly awards: per-category winners for any completed (or current) month.
+    if (request.method === 'GET' && path === '/api/awards') {
+      const month = url.searchParams.get('month') ?? today.slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(month) || month > today.slice(0, 7)) return err('Invalid month', 400);
+      return json(await monthlyAwards(env, month, today, graceDays));
+    }
+
     if (request.method === 'GET' && path === '/api/me') {
       // PIN arrives as a header (preferred — keeps it out of URLs/logs) or query param.
       const member = await authMember(
@@ -125,6 +133,7 @@ export async function handleApi(request, env) {
         bedtime: member.bedtime,
         food_rule: member.food_rule,
         chores_rule: member.chores_rule,
+        outside_rule: member.outside_rule,
         email: member.email,
         push: !!member.push_subscription,
         today,
@@ -158,11 +167,14 @@ export async function handleApi(request, env) {
       const foodRule = typeof body.foodRule === 'string' ? body.foodRule.trim() : null;
       const bedtime = typeof body.bedtime === 'string' ? body.bedtime.trim() : null;
       const chores = typeof body.chores === 'string' ? body.chores.trim() : null;
-      if (tooLong(foodRule, LIMITS.rule) || tooLong(chores, LIMITS.rule) || tooLong(bedtime, LIMITS.bedtime)) {
+      const outside = typeof body.outside === 'string' ? body.outside.trim() : null;
+      if (tooLong(foodRule, LIMITS.rule) || tooLong(chores, LIMITS.rule) ||
+          tooLong(outside, LIMITS.rule) || tooLong(bedtime, LIMITS.bedtime)) {
         return err('That text is too long', 400);
       }
       if (bedtime && member.role === 'kid') return err('Only a parent can change your bedtime', 403);
       if (chores && member.role === 'kid') return err('Only a parent can change your chores', 403);
+      if (outside && member.role === 'kid') return err('Only a parent can change your outside goal', 403);
       let email;
       if (typeof body.email === 'string') {
         email = body.email.trim();
@@ -193,6 +205,9 @@ export async function handleApi(request, env) {
       }
       if (chores) {
         await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?').bind(chores, member.id).run();
+      }
+      if (outside) {
+        await env.DB.prepare('UPDATE members SET outside_rule = ? WHERE id = ?').bind(outside, member.id).run();
       }
       if (email !== undefined) {
         await env.DB.prepare('UPDATE members SET email = ? WHERE id = ?').bind(email || null, member.id).run();
@@ -278,16 +293,23 @@ export async function handleApi(request, env) {
       if (!actor || actor.role === 'kid') return err('Admin access required', 403);
       const m = body.member ?? {};
 
-      // Non-admin adults get exactly one power here: setting a kid's chores.
+      // Non-admin adults get two powers here: setting any kid's chores, and
+      // setting anyone's outside/exercise question.
       if (actor.role === 'adult') {
         if (body.action !== 'update') return err('Admin access required', 403);
         const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(m.id).first();
         if (!target) return err('No such member', 404);
-        if (target.role !== 'kid') return err("Adults can only edit kids' chores", 403);
-        if (!m.chores?.trim()) return err('No chores provided', 400);
-        if (tooLong(m.chores, LIMITS.rule)) return err('That text is too long', 400);
-        await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
-          .bind(m.chores.trim(), m.id).run();
+        const chores = m.chores?.trim();
+        const outside = m.outside?.trim();
+        if (!chores && !outside) return err('Nothing to update', 400);
+        if (tooLong(chores, LIMITS.rule) || tooLong(outside, LIMITS.rule)) return err('That text is too long', 400);
+        if (chores && target.role !== 'kid') return err("Adults can only edit kids' chores", 403);
+        if (chores) {
+          await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?').bind(chores, m.id).run();
+        }
+        if (outside) {
+          await env.DB.prepare('UPDATE members SET outside_rule = ? WHERE id = ?').bind(outside, m.id).run();
+        }
         return json({ ok: true });
       }
 
@@ -299,13 +321,14 @@ export async function handleApi(request, env) {
         }
         try {
           await env.DB.prepare(
-            'INSERT INTO members (name, email, role, bedtime, food_rule, chores_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO members (name, email, role, bedtime, food_rule, chores_rule, outside_rule, pin_hash, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
           ).bind(
             m.name.trim(), m.email ?? null, m.role,
             m.bedtime?.trim() || '9:00 PM', m.foodRule?.trim() || 'junk food',
             m.chores?.trim() || 'daily chores',
+            m.outside?.trim() || 'Went outside for 30+ minutes',
             m.pin ? await sha256Hex(String(m.pin)) : null,
-            addDays(today, -graceDays)   // open the full grace window from day one
+            today   // starts today; their first check-in is tomorrow, about today
           ).run();
         } catch (e) {
           if (String(e.message).includes('UNIQUE')) return err('That name is already taken', 400);
@@ -342,13 +365,14 @@ export async function handleApi(request, env) {
           bedtime: m.bedtime?.trim() || target.bedtime,
           food_rule: m.foodRule?.trim() || target.food_rule,
           chores_rule: m.chores?.trim() || target.chores_rule,
+          outside_rule: m.outside?.trim() || target.outside_rule,
           // clearPin removes the PIN entirely; otherwise a new pin replaces, blank keeps.
           pin_hash: m.clearPin ? null : m.pin ? await sha256Hex(String(m.pin)) : target.pin_hash,
         };
         try {
           await env.DB.prepare(
-            'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, chores_rule = ?, pin_hash = ? WHERE id = ?'
-          ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.chores_rule, updates.pin_hash, m.id).run();
+            'UPDATE members SET name = ?, email = ?, role = ?, bedtime = ?, food_rule = ?, chores_rule = ?, outside_rule = ?, pin_hash = ? WHERE id = ?'
+          ).bind(updates.name, updates.email, updates.role, updates.bedtime, updates.food_rule, updates.chores_rule, updates.outside_rule, updates.pin_hash, m.id).run();
         } catch (e) {
           if (String(e.message).includes('UNIQUE')) return err('That name is already taken', 400);
           throw e;
@@ -395,6 +419,42 @@ async function saveCheckin(env, memberId, date, body) {
     vacation ? 1 : 0
   ).run();
   return json({ ok: true });
+}
+
+const AWARD_CATEGORIES = [
+  { key: 'bedtime', label: '🛏️ Bedtime champion', unit: 'days' },
+  { key: 'food', label: '🥩 Food goal champion', unit: 'days' },
+  { key: 'chores', label: '🧹 Chores champion', unit: 'days' },
+  { key: 'outside', label: '🌳 Outside & exercise champion', unit: 'days' },
+  { key: 'perfect', label: '⭐ Star status (most perfect days)', unit: 'days' },
+  { key: 'longestRun', label: '🔥 Longest streak of the month', unit: 'days in a row' },
+];
+
+/** Compute each category's winner(s) for one month. */
+export async function monthlyAwards(env, month, today, graceDays) {
+  const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
+  const { results: entries } = await env.DB.prepare(
+    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE date LIKE ?'
+  ).bind(month + '-%').all();
+  const byMember = new Map();
+  for (const e of entries) {
+    if (!byMember.has(e.member_id)) byMember.set(e.member_id, []);
+    byMember.get(e.member_id).push(e);
+  }
+  const totals = members.map((m) => ({
+    name: m.name,
+    totals: monthTotals(m, byMember.get(m.id) ?? [], month, today, graceDays),
+  }));
+  return {
+    month,
+    categories: AWARD_CATEGORIES.map(({ key, label, unit }) => {
+      const best = Math.max(0, ...totals.map((t) => t.totals[key]));
+      return {
+        key, label, unit, best,
+        winners: best > 0 ? totals.filter((t) => t.totals[key] === best).map((t) => t.name) : [],
+      };
+    }),
+  };
 }
 
 async function adminCount(env) {

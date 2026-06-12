@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, loggableDates, dayStatus, memberStats, prevMonthPrefix } from '../src/stats.js';
+import { addDays, loggableDates, dayStatus, memberStats, monthTotals, prevMonthPrefix } from '../src/stats.js';
 
 const TODAY = '2026-06-11';
 const GRACE = 3;
@@ -143,6 +143,34 @@ test('lastMonth tally counts only the previous month', () => {
   const s = memberStats(m, entries, TODAY, GRACE);
   assert.equal(s.lastMonth.perfect, 2);
   assert.equal(s.month.perfect, 1);
+});
+
+test('monthTotals counts per-question yes days and the longest perfect run in the month', () => {
+  const m = { start_date: '2026-05-01' };
+  const entries = [
+    entry('2026-05-02', true, true),            // perfect
+    entry('2026-05-03', true, true),            // perfect (run of 2)
+    entry('2026-05-04', true, false),           // bedtime only — breaks run
+    entry('2026-05-10', true, true),            // perfect
+    entry('2026-06-01', true, true),            // next month, ignored
+  ];
+  const t = monthTotals(m, entries.filter((e) => e.date.startsWith('2026-05')), '2026-05', TODAY, GRACE);
+  assert.equal(t.bedtime, 4);
+  assert.equal(t.food, 3);
+  assert.equal(t.perfect, 3);
+  assert.equal(t.longestRun, 2);
+});
+
+test('monthTotals: away days bridge the perfect run', () => {
+  const m = { start_date: '2026-05-01' };
+  const entries = [
+    entry('2026-05-02', true, true),
+    vacation('2026-05-03'),
+    entry('2026-05-04', true, true),
+  ];
+  const t = monthTotals(m, entries, '2026-05', TODAY, GRACE);
+  assert.equal(t.longestRun, 2);
+  assert.equal(t.perfect, 2);
 });
 
 test('prevMonthPrefix crosses year boundaries', () => {

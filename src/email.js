@@ -132,7 +132,7 @@ export async function sendWeeklySummary(env) {
   const html = `
     <h2>🏆 Family Leaderboard — week of ${today}</h2>
     <table style="border-collapse:collapse;font-family:sans-serif">
-      <tr><th></th><th style="padding:6px 12px">🛏️ Bedtime</th><th style="padding:6px 12px">🥦 Food</th>
+      <tr><th></th><th style="padding:6px 12px">🛏️ Bedtime</th><th style="padding:6px 12px">🥩 Food</th>
           <th style="padding:6px 12px">🧹 Chores</th><th style="padding:6px 12px">🌳 Outside</th>
           <th style="padding:6px 12px">⭐ Perfect</th><th style="padding:6px 12px">Streak</th></tr>
       ${rows}

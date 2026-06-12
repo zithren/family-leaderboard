@@ -223,6 +223,7 @@ async function login(id, pinValue, { silent = false } = {}) {
     localStorage.setItem('memberId', id);
     localStorage.setItem('pin', pinValue);
     histMemberId = null; histMonth = null; histEdit = null;
+    resetAnswers();
     $('#nav').classList.remove('hidden');
     setTab('checkin');
     return true;
@@ -236,20 +237,31 @@ function logout() {
   localStorage.removeItem('memberId');
   localStorage.removeItem('pin');
   me = null; memberId = ''; pin = '';
+  resetAnswers();
   showLogin();
 }
 
 /* ---------- Check-in ---------- */
-const answers = {}; // date -> {bedtime: bool|null, food: bool|null, chores: bool|null}
+// date -> selected answers. Per person: must be wiped when switching users,
+// or one member's unsaved selections bleed into the next member's cards.
+const answers = {};
+function resetAnswers() {
+  for (const k of Object.keys(answers)) delete answers[k];
+}
 
 function renderCheckin() {
   $('#sub').textContent = `Hi ${me.name}! 👋`;
   // Most recent day first.
   const days = [...me.days].reverse();
+  const emptyState = `<div class="card" style="text-align:center">
+      <div class="q">🎉 <b>Fresh start!</b></div>
+      <p class="muted">Your first check-in unlocks tomorrow — you'll answer for today.
+      Until then, set up your goals on the Profile tab.</p>
+    </div>`;
   view.innerHTML = `<div class="row" style="margin:2px 4px 0">
       <span class="muted">Logging for <b>${esc(me.name)}</b></span>
       <button class="linkish" id="switchPerson">👤 Switch person</button>
-    </div>` + days.map((d) => {
+    </div>` + (days.length === 0 ? emptyState : '') + days.map((d) => {
     const vac = !!d.entry?.vacation;
     const a = answers[d.date] ?? (d.entry && !vac
       ? { bedtime: !!d.entry.bedtime_yes, food: !!d.entry.food_yes, chores: !!d.entry.chores_yes, outside: !!d.entry.outside_yes }
@@ -262,15 +274,14 @@ function renderCheckin() {
         <span class="badge ${d.entry ? 'done-badge' : ''}">${vac ? '🏖️ vacation' : d.entry ? '✓ logged' : 'needs an answer'}</span>
       </div>
       ${vac ? `
-      <div class="q" style="text-align:center;padding:8px 0">🏖️ <b>Vacation day</b> — doesn't count for or against you</div>
-      <button class="primary unvacation">Undo vacation</button>
+      <div class="q" style="text-align:center;padding:8px 0">✈️ <b>Away day</b> — doesn't count for or against you (set by a parent)</div>
       ` : `
       <div class="q">🛏️ In bed by <b>${esc(me.bedtime)}</b>?<small>your bedtime</small></div>
       <div class="yn" data-q="bedtime">
         <button class="yes ${a.bedtime === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.bedtime === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🥦 Stuck to <b>${esc(me.food_rule)}</b>?<small>your food goal</small></div>
+      <div class="q">🥩 Stuck to <b>${esc(me.food_rule)}</b>?<small>your food goal</small></div>
       <div class="yn" data-q="food">
         <button class="yes ${a.food === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.food === false ? 'sel' : ''}">No</button>
@@ -280,16 +291,13 @@ function renderCheckin() {
         <button class="yes ${a.chores === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.chores === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🌳 Went outside for <b>30+ minutes</b>?<small>ideally more!</small></div>
+      <div class="q">🌳 <b>${esc(me.outside_rule.replace(/\?+$/, ''))}</b>?<small>your outside & exercise goal</small></div>
       <div class="yn" data-q="outside">
         <button class="yes ${a.outside === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.outside === false ? 'sel' : ''}">No</button>
       </div>
       <button class="primary save">Save ${relLabel(d.date, me.today).toLowerCase()}</button>
-      <div class="yn" style="margin-top:8px">
-        <button class="vacation">🏖️ Vacation day</button>
-        ${d.entry ? '<button class="clearday">Clear answers</button>' : ''}
-      </div>`}
+      ${d.entry ? '<div class="yn" style="margin-top:8px"><button class="clearday">Clear answers</button></div>' : ''}`}
     </div>`;
   }).join('');
 
@@ -317,8 +325,6 @@ function renderCheckin() {
       }
       send(date, { bedtimeYes: a.bedtime, foodYes: a.food, choresYes: a.chores, outsideYes: a.outside }, 'Saved! 🎉');
     });
-    card.querySelector('.vacation')?.addEventListener('click', () => send(date, { vacation: true }, '🏖️ Marked as vacation'));
-    card.querySelector('.unvacation')?.addEventListener('click', () => send(date, { clear: true }, 'Vacation removed'));
     card.querySelector('.clearday')?.addEventListener('click', () => send(date, { clear: true }, 'Answers cleared'));
   });
 }
@@ -350,7 +356,7 @@ async function renderHistory() {
   const firstDow = new Date(histMonth + '-01T00:00:00').getDay();
   const cells = Array(firstDow).fill('<div></div>').concat(h.days.map((day) =>
     `<div class="cal ${dayClass(day, h.today)}" data-date="${day.date}">
-       ${Number(day.date.slice(8))}${day.vacation ? '<span class="cal-ico">🏖️</span>' : ''}
+       ${Number(day.date.slice(8))}${day.vacation ? '<span class="cal-ico">✈️</span>' : ''}
      </div>`));
 
   view.innerHTML = `<div class="card">
@@ -369,7 +375,7 @@ async function renderHistory() {
       <span style="color:var(--green)">■</span> perfect ·
       <span style="color:#f4a261">■</span> partial ·
       <span style="color:var(--red)">■</span> missed ·
-      <span style="color:#4f6d9e">■</span> 🏖️ vacation ·
+      <span style="color:#4f6d9e">■</span> ✈️ away ·
       dashed = still loggable</p>
     ${me.role === 'admin' ? '<p class="muted">👑 Tap any past day to correct it.</p><div id="dayEditor"></div>' : ''}
   </div>`;
@@ -417,10 +423,10 @@ function renderDayEditor(h) {
   $('#dayEditor').innerHTML = `
     <div style="border-top:1px solid var(--card2);margin-top:10px;padding-top:8px">
       <b>Fixing ${esc(h.member.name)} — ${fmtFull(ed.date)}</b>
-      ${yn('bedtime', '🛏️ Bedtime')}${yn('food', '🥦 Food goal')}${yn('chores', '🧹 Chores')}${yn('outside', '🌳 Outside 30+ min')}
+      ${yn('bedtime', '🛏️ Bedtime')}${yn('food', '🥩 Food goal')}${yn('chores', '🧹 Chores')}${yn('outside', '🌳 Outside & exercise')}
       <button class="primary" id="edSave">Save correction</button>
       <div class="yn" style="margin-top:8px">
-        <button id="edVacation">🏖️ Vacation day</button>
+        <button id="edVacation">✈️ Away day</button>
         <button id="edClear">Clear day</button>
       </div>
     </div>`;
@@ -443,7 +449,7 @@ function renderDayEditor(h) {
     }
     sendFix({ bedtimeYes: ed.bedtime, foodYes: ed.food, choresYes: ed.chores, outsideYes: ed.outside }, 'Corrected! 🎉');
   });
-  $('#edVacation').addEventListener('click', () => sendFix({ vacation: true }, '🏖️ Marked as vacation'));
+  $('#edVacation').addEventListener('click', () => sendFix({ vacation: true }, '✈️ Marked as an away day'));
   $('#edClear').addEventListener('click', () => sendFix({ clear: true }, 'Day cleared'));
 }
 
@@ -464,9 +470,39 @@ function championBanner(board) {
     ${top.stats.lastMonth.perfect} perfect day${top.stats.lastMonth.perfect === 1 ? '' : 's'}! 🎉</div>`;
 }
 
+function monthShift(yyyymm, delta) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+const monthName = (yyyymm) =>
+  new Date(yyyymm + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+let histAwardsMonth = null; // YYYY-MM chosen in the historical awards section
+
+function awardsList(aw) {
+  const rows = aw.categories.map((c) => `
+    <tr><td style="font-weight:400">${c.label}</td>
+      <td style="text-align:right">${c.winners.length
+        ? `<b>${c.winners.map((w) => esc(w.split(' ')[0])).join(' & ')}</b> <span class="muted">(${c.best} ${c.unit})</span>`
+        : '<span class="muted">—</span>'}</td></tr>`).join('');
+  const any = aw.categories.some((c) => c.winners.length);
+  return any
+    ? `<table>${rows}</table>`
+    : `<p class="muted">No check-ins were logged in ${monthName(aw.month)}.</p>`;
+}
+
 async function renderBoard() {
   $('#sub').textContent = 'Who is winning?';
   const board = await api('/api/leaderboard');
+  const lastMonth = monthShift(board.today.slice(0, 7), -1);
+  histAwardsMonth ??= monthShift(board.today.slice(0, 7), -2);
+  const [lastAwards, histAwards] = await Promise.all([
+    api(`/api/awards?month=${lastMonth}`),
+    api(`/api/awards?month=${histAwardsMonth}`),
+  ]);
+  // months selectable in history: from 2 months ago back one year
+  const histOptions = Array.from({ length: 12 }, (_, i) => monthShift(board.today.slice(0, 7), -2 - i));
   const period = boardPeriod;
   const score = (m) => m.stats[period].bedtime + m.stats[period].food + m.stats[period].chores + m.stats[period].outside;
   const sorted = [...board.members].sort((a, b) =>
@@ -478,7 +514,7 @@ async function renderBoard() {
         `<button data-p="${p}" class="${p === period ? 'sel' : ''}">${p === 'month' ? 'This month' : p === 'year' ? 'This year' : 'All time'}</button>`).join('')}
     </div>
     <table>
-      <tr><th></th><th>🛏️</th><th>🥦</th><th>🧹</th><th>🌳</th><th>⭐</th></tr>
+      <tr><th></th><th>🛏️</th><th>🥩</th><th>🧹</th><th>🌳</th><th>⭐</th></tr>
       ${sorted.map((m, i) => `<tr>
         <td>${medals[i] ?? ''} ${esc(m.name.split(' ')[0])}<br>
           <span class="streak">🔥 ${m.stats.streaks.perfect.current} day streak (best ${m.stats.streaks.perfect.longest})</span></td>
@@ -489,10 +525,23 @@ async function renderBoard() {
         <td><b>${m.stats[period].perfect}</b></td>
       </tr>`).join('')}
     </table>
-    <p class="muted" style="margin-top:10px">🛏️ bedtime · 🥦 food goal · 🧹 chores · 🌳 outside 30+ min · ⭐ perfect days (all four). Streaks count perfect days.</p>
+    <p class="muted" style="margin-top:10px">🛏️ bedtime · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four). Streaks count perfect days.</p>
+  </div>
+  <div class="card">
+    <b>👑 ${monthName(lastMonth)} awards</b>
+    <div style="margin-top:8px">${awardsList(lastAwards)}</div>
+    <p class="muted" style="margin-top:8px">A new set of awards is crowned on the 1st of every month.</p>
+  </div>
+  <div class="card">
+    <div class="row"><b>📜 Award history</b>
+      <select id="histMonthSel" style="width:auto">${histOptions.map((mo) =>
+        `<option value="${mo}" ${mo === histAwardsMonth ? 'selected' : ''}>${monthName(mo)}</option>`).join('')}</select>
+    </div>
+    <div style="margin-top:8px">${awardsList(histAwards)}</div>
   </div>`;
   view.querySelectorAll('.tabs button').forEach((b) =>
     b.addEventListener('click', () => { boardPeriod = b.dataset.p; renderBoard(); }));
+  $('#histMonthSel').addEventListener('change', (e) => { histAwardsMonth = e.target.value; renderBoard(); });
 }
 
 /* ---------- Profile ---------- */
@@ -504,11 +553,15 @@ function renderProfile() {
     <label>🛏️ Your bedtime</label>
     <input type="text" id="bedtime" value="${esc(me.bedtime)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your bedtime.</div>' : ''}
-    <label>🥦 Food you're avoiding (your own goal)</label>
+    <label>🥩 Food you're avoiding (your own goal)</label>
     <input type="text" id="foodRule" value="${esc(me.food_rule)}">
     <label>🧹 Your chores</label>
     <input type="text" id="chores" value="${esc(me.chores_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your chores.</div>' : ''}
+    <label>🌳 Your outside &amp; exercise question</label>
+    <input type="text" id="outside" value="${esc(me.outside_rule)}" ${isKid ? 'disabled' : ''}>
+    ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change this.</div>'
+            : '<div class="muted" style="margin-top:4px">Shown as your daily question, e.g. "Walk Merlin" or "Met my exercise goal".</div>'}
     <label>📧 Email for reminders (optional)</label>
     <input type="email" id="email" value="${esc(me.email ?? '')}" placeholder="you@example.com">
     <div class="muted" style="margin-top:4px">Daily nudges and the weekly leaderboard land here. Leave blank for no emails.</div>
@@ -531,7 +584,7 @@ function renderProfile() {
          </form>
        </div>`
     : me.role === 'adult'
-      ? '<div class="card"><b>🧹 Kids’ chores</b><div id="kidChores" class="muted" style="margin-top:8px">Loading…</div></div>'
+      ? '<div class="card"><b>👨‍👩‍👧 Family goals</b><div class="muted" style="margin-top:4px">Set anyone’s outside &amp; exercise question, and kids’ chores.</div><div id="kidChores" class="muted" style="margin-top:8px">Loading…</div></div>'
       : ''}`;
 
   $('#saveProfile').addEventListener('click', async () => {
@@ -540,7 +593,7 @@ function renderProfile() {
         memberId: me.id, pin,
         foodRule: $('#foodRule').value,
         email: $('#email').value,
-        ...(isKid ? {} : { bedtime: $('#bedtime').value, chores: $('#chores').value }),
+        ...(isKid ? {} : { bedtime: $('#bedtime').value, chores: $('#chores').value, outside: $('#outside').value }),
       });
       me = await api(`/api/me?memberId=${me.id}`);
       toast('Saved! 🎉');
@@ -582,6 +635,7 @@ async function renderAdmin() {
       <label>Role</label>${roleSelect('a-role', m.role)}
       <label>Bedtime</label><input type="text" class="a-bedtime" value="${esc(m.bedtime)}">
       <label>Chores</label><input type="text" class="a-chores" value="${esc(m.chores_rule)}">
+      <label>Outside &amp; exercise question</label><input type="text" class="a-outside" value="${esc(m.outside_rule)}">
       <label>Email for reminders (blank = none)</label><input type="email" class="a-email" value="${esc(m.email ?? '')}" placeholder="them@example.com">
       <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••" autocomplete="off">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
@@ -597,6 +651,7 @@ async function renderAdmin() {
       <label>Role</label>${roleSelect('add-role', 'kid')}
       <label>Bedtime</label><input type="text" id="add-bedtime" placeholder="9:00 PM">
       <label>Chores</label><input type="text" id="add-chores" placeholder="daily chores">
+      <label>Outside &amp; exercise question</label><input type="text" id="add-outside" placeholder="Went outside for 30+ minutes">
       <label>PIN (optional)</label><input type="text" id="add-pin" inputmode="numeric" placeholder="leave blank for no PIN">
       <button class="primary" id="a-add">Add member</button>
     </div>`;
@@ -612,6 +667,7 @@ async function renderAdmin() {
             role: row.querySelector('.a-role').value,
             bedtime: row.querySelector('.a-bedtime').value,
             chores: row.querySelector('.a-chores').value,
+            outside: row.querySelector('.a-outside').value,
             email: row.querySelector('.a-email').value.trim() || null,
             pin: row.querySelector('.a-pin').value || undefined,
             clearPin: row.querySelector('.a-nopin').checked || undefined,
@@ -642,8 +698,8 @@ async function renderAdmin() {
           name: $('#add-name').value,
           role: document.querySelector('.add-role').value,
           bedtime: $('#add-bedtime').value || undefined,
-          foodRule: undefined,
           chores: $('#add-chores').value || undefined,
+          outside: $('#add-outside').value || undefined,
           pin: $('#add-pin').value || undefined,
         },
       });
@@ -690,14 +746,15 @@ async function disablePush() {
   } catch (e) { toast(e.message, true); }
 }
 
-/** Non-admin adults can set each kid's chores. */
+/** Non-admin adults: set anyone's outside/exercise question, and kids' chores. */
 async function renderKidChores() {
   const members = await api('/api/members');
-  const kids = members.filter((m) => m.role === 'kid');
-  $('#kidChores').innerHTML = kids.map((m) => `
+  $('#kidChores').innerHTML = members.map((m) => `
     <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
-      <div class="row"><b style="color:var(--text)">${esc(m.name)}</b></div>
-      <label>Chores</label><input type="text" class="k-chores" value="${esc(m.chores_rule)}">
+      <div class="row"><b style="color:var(--text)">${esc(m.name)}</b><span class="badge">${m.role}</span></div>
+      <label>🌳 Outside &amp; exercise question</label>
+      <input type="text" class="k-outside" value="${esc(m.outside_rule)}">
+      ${m.role === 'kid' ? `<label>🧹 Chores</label><input type="text" class="k-chores" value="${esc(m.chores_rule)}">` : ''}
       <button class="primary k-save" style="margin-top:8px">Update ${esc(m.name.split(' ')[0])}</button>
     </div>`).join('');
   $('#kidChores').querySelectorAll('[data-id]').forEach((row) => {
@@ -705,7 +762,11 @@ async function renderKidChores() {
       try {
         await api('/api/admin/member', {
           adminId: me.id, pin, action: 'update',
-          member: { id: Number(row.dataset.id), chores: row.querySelector('.k-chores').value },
+          member: {
+            id: Number(row.dataset.id),
+            outside: row.querySelector('.k-outside').value,
+            ...(row.querySelector('.k-chores') ? { chores: row.querySelector('.k-chores').value } : {}),
+          },
         });
         toast('Updated! 🎉');
         renderKidChores();
