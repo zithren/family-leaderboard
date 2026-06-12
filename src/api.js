@@ -59,6 +59,9 @@ export async function handleApi(request, env) {
         'SELECT date, bedtime_yes, food_yes FROM checkins WHERE member_id = ? AND date >= ?'
       ).bind(member.id, dates[0]).all();
       const byDate = Object.fromEntries(entries.map((e) => [e.date, e]));
+      // Clamp: SQLite's date('now') is UTC, so a freshly seeded start_date can
+      // be "tomorrow" in the family timezone — never let it hide today's card.
+      const start = member.start_date > today ? today : member.start_date;
       return json({
         id: member.id,
         name: member.name,
@@ -66,7 +69,7 @@ export async function handleApi(request, env) {
         bedtime: member.bedtime,
         food_rule: member.food_rule,
         today,
-        days: dates.filter((d) => d >= member.start_date).map((d) => ({ date: d, entry: byDate[d] ?? null })),
+        days: dates.filter((d) => d >= start).map((d) => ({ date: d, entry: byDate[d] ?? null })),
       });
     }
 

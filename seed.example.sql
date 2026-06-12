@@ -8,9 +8,9 @@
 -- Leave pin_hash NULL for no PIN.
 
 INSERT INTO members (name, email, role, bedtime, food_rule, pin_hash, start_date) VALUES
-  ('Alex Example',   'alex@example.com',   'admin', '10:30 PM', 'no ultraprocessed food or cane sugar', '0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c', date('now')),
-  ('Bailey Example', 'bailey@example.com', 'adult', '10:45 PM', 'no junk food after dinner',            'edee29f882543b956620b26d0ee0e7e950399b1c4222f5de05e06425b4c995e9', date('now')),
-  ('Casey Example',  'casey@example.com',  'kid',   '9:00 PM',  'no candy or soda',                     '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now')),
-  ('Drew Example',   'drew@example.com',   'kid',   '9:00 PM',  'no candy or chips',                    '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now')),
-  ('Emery Example',  'emery@example.com',  'kid',   '8:30 PM',  'no dessert on weekdays',               '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now')),
-  ('Finley Example', 'finley@example.com', 'kid',   '8:30 PM',  'no sugary cereal',                     '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now'));
+  ('Alex Example',   'alex@example.com',   'admin', '10:30 PM', 'no ultraprocessed food or cane sugar', '0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c', date('now', '-1 day')),
+  ('Bailey Example', 'bailey@example.com', 'adult', '10:45 PM', 'no junk food after dinner',            'edee29f882543b956620b26d0ee0e7e950399b1c4222f5de05e06425b4c995e9', date('now', '-1 day')),
+  ('Casey Example',  'casey@example.com',  'kid',   '9:00 PM',  'no candy or soda',                     '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now', '-1 day')),
+  ('Drew Example',   'drew@example.com',   'kid',   '9:00 PM',  'no candy or chips',                    '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now', '-1 day')),
+  ('Emery Example',  'emery@example.com',  'kid',   '8:30 PM',  'no dessert on weekdays',               '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now', '-1 day')),
+  ('Finley Example', 'finley@example.com', 'kid',   '8:30 PM',  'no sugary cereal',                     '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', date('now', '-1 day'));
