@@ -1,0 +1,9 @@
+# Private family data — never commit
+seed.local.sql
+.dev.vars
+
+# Tooling
+node_modules/
+.wrangler/
+.claude/
+.DS_Store

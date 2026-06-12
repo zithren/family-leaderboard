@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<title>Family Leaderboard</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --card: #24243e; --card2: #2d2d52; --text: #eaeaf2;
+    --muted: #9a9ab8; --accent: #ffd166; --green: #06d6a0; --red: #ef476f;
+    --blue: #6ab6ff;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: max(12px, env(safe-area-inset-top)) 16px calc(84px + env(safe-area-inset-bottom));
+  }
+  h1 { font-size: 1.4rem; text-align: center; padding: 10px 0 2px; }
+  .sub { text-align: center; color: var(--muted); font-size: .85rem; margin-bottom: 16px; }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; margin: 12px 0; }
+  button {
+    font: inherit; border: 0; border-radius: 12px; padding: 12px 16px;
+    background: var(--card2); color: var(--text); cursor: pointer; touch-action: manipulation;
+  }
+  button:active { transform: scale(.97); }
+  .primary { background: var(--accent); color: #1a1a2e; font-weight: 700; width: 100%; margin-top: 12px; }
+  .member-btn { display: block; width: 100%; margin: 8px 0; font-size: 1.1rem; text-align: left; padding: 16px; }
+  .pin-input {
+    font-size: 1.6rem; letter-spacing: .5em; text-align: center; width: 100%;
+    background: var(--card2); border: 0; border-radius: 12px; padding: 12px; color: var(--text); margin-top: 12px;
+  }
+  .q { margin: 14px 0 6px; font-size: 1rem; }
+  .q small { color: var(--muted); display: block; margin-top: 2px; }
+  .yn { display: flex; gap: 10px; margin-top: 8px; }
+  .yn button { flex: 1; font-size: 1.05rem; font-weight: 600; border: 2px solid transparent; }
+  .yn button.yes.sel { background: var(--green); color: #08281f; }
+  .yn button.no.sel { background: var(--red); color: #fff; }
+  .daylabel { font-weight: 700; color: var(--accent); }
+  .badge { font-size: .75rem; background: var(--card2); border-radius: 999px; padding: 3px 10px; color: var(--muted); }
+  .done-badge { color: var(--green); }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { color: var(--muted); font-size: .75rem; font-weight: 600; padding: 6px 4px; text-align: center; }
+  th:first-child { text-align: left; }
+  td { padding: 10px 4px; text-align: center; font-variant-numeric: tabular-nums; border-top: 1px solid var(--card2); }
+  td:first-child { text-align: left; font-weight: 600; }
+  .streak { color: var(--accent); font-size: .8rem; }
+  .tabs { display: flex; gap: 8px; margin: 4px 0 8px; }
+  .tabs button { flex: 1; font-size: .85rem; padding: 8px; }
+  .tabs button.sel { background: var(--accent); color: #1a1a2e; font-weight: 700; }
+  nav {
+    position: fixed; bottom: 0; left: 0; right: 0; display: flex;
+    background: var(--card); padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--card2);
+  }
+  nav button { flex: 1; background: none; font-size: .8rem; color: var(--muted); }
+  nav button.sel { color: var(--accent); }
+  nav .ico { font-size: 1.3rem; display: block; }
+  label { display: block; color: var(--muted); font-size: .85rem; margin: 14px 0 4px; }
+  input[type=text], input[type=email], select {
+    width: 100%; font: inherit; background: var(--card2); border: 0; border-radius: 10px;
+    padding: 10px 12px; color: var(--text);
+  }
+  .toast {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    background: var(--green); color: #08281f; font-weight: 700; border-radius: 999px;
+    padding: 10px 20px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 10;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--red); color: #fff; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  .linkish { background: none; color: var(--blue); padding: 4px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>🏆 Family Leaderboard</h1>
+<div class="sub" id="sub">Bedtime &amp; healthy eating, one day at a time</div>
+<div id="view"></div>
+<nav id="nav" class="hidden">
+  <button data-tab="checkin"><span class="ico">✅</span>Check in</button>
+  <button data-tab="board"><span class="ico">🏆</span>Board</button>
+  <button data-tab="profile"><span class="ico">⚙️</span>Profile</button>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const view = $('#view');
+let me = null;                       // {id, name, role, bedtime, food_rule, today, days}
+let pin = localStorage.getItem('pin') || '';
+let memberId = localStorage.getItem('memberId') || '';
+let tab = 'checkin';
+let boardPeriod = 'month';
+
+function toast(msg, isError = false) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => (t.className = 'toast'), 2200);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts && {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Something went wrong');
+  return data;
+}
+
+function fmtDay(dateStr, today) {
+  const diff = Math.round((new Date(today) - new Date(dateStr)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+/* ---------- Login ---------- */
+async function showLogin(preselect) {
+  $('#nav').classList.add('hidden');
+  const members = await api('/api/members');
+  if (preselect == null) {
+    view.innerHTML = '<div class="card"><div class="muted">Who are you?</div>' +
+      members.map((m) => `<button class="member-btn" data-id="${m.id}" data-pin="${m.has_pin}">${m.name}</button>`).join('') +
+      '</div>';
+    view.querySelectorAll('.member-btn').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (b.dataset.pin === '1') showLogin(b.dataset.id);
+        else login(b.dataset.id, '');
+      })
+    );
+  } else {
+    view.innerHTML = `<div class="card"><div class="muted">Enter your PIN</div>
+      <input class="pin-input" id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off">
+      <button class="primary" id="go">Let's go</button>
+      <button class="linkish" id="back">← Not me</button></div>`;
+    $('#pin').focus();
+    $('#go').addEventListener('click', () => login(preselect, $('#pin').value));
+    $('#pin').addEventListener('keydown', (e) => e.key === 'Enter' && login(preselect, $('#pin').value));
+    $('#back').addEventListener('click', () => showLogin());
+  }
+}
+
+async function login(id, pinValue) {
+  try {
+    me = await api(`/api/me?memberId=${id}&pin=${encodeURIComponent(pinValue)}`);
+    memberId = id; pin = pinValue;
+    localStorage.setItem('memberId', id);
+    localStorage.setItem('pin', pinValue);
+    $('#nav').classList.remove('hidden');
+    setTab('checkin');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function logout() {
+  localStorage.removeItem('memberId');
+  localStorage.removeItem('pin');
+  me = null; memberId = ''; pin = '';
+  showLogin();
+}
+
+/* ---------- Check-in ---------- */
+const answers = {}; // date -> {bedtime: bool|null, food: bool|null}
+
+function renderCheckin() {
+  $('#sub').textContent = `Hi ${me.name}! 👋`;
+  // Most recent first; today last in the list is confusing, so show yesterday first.
+  const days = [...me.days].reverse();
+  view.innerHTML = days.map((d) => {
+    const a = answers[d.date] ?? (d.entry
+      ? { bedtime: !!d.entry.bedtime_yes, food: !!d.entry.food_yes }
+      : { bedtime: null, food: null });
+    answers[d.date] = a;
+    const isToday = d.date === me.today;
+    return `<div class="card" data-date="${d.date}">
+      <div class="row">
+        <span class="daylabel">${fmtDay(d.date, me.today)}</span>
+        <span class="badge ${d.entry ? 'done-badge' : ''}">${d.entry ? '✓ logged' : isToday ? 'optional — log tomorrow' : 'needs an answer'}</span>
+      </div>
+      <div class="q">🛏️ In bed by <b>${me.bedtime}</b>?<small>your bedtime</small></div>
+      <div class="yn" data-q="bedtime">
+        <button class="yes ${a.bedtime === true ? 'sel' : ''}">Yes 🎉</button>
+        <button class="no ${a.bedtime === false ? 'sel' : ''}">No</button>
+      </div>
+      <div class="q">🥦 Stuck to <b>${me.food_rule}</b>?<small>your food goal</small></div>
+      <div class="yn" data-q="food">
+        <button class="yes ${a.food === true ? 'sel' : ''}">Yes 🎉</button>
+        <button class="no ${a.food === false ? 'sel' : ''}">No</button>
+      </div>
+      <button class="primary save">Save ${fmtDay(d.date, me.today).toLowerCase()}</button>
+    </div>`;
+  }).join('');
+
+  view.querySelectorAll('.card').forEach((card) => {
+    const date = card.dataset.date;
+    card.querySelectorAll('.yn').forEach((yn) => {
+      const q = yn.dataset.q;
+      yn.querySelector('.yes').addEventListener('click', () => { answers[date][q] = true; renderCheckin(); });
+      yn.querySelector('.no').addEventListener('click', () => { answers[date][q] = false; renderCheckin(); });
+    });
+    card.querySelector('.save').addEventListener('click', async () => {
+      const a = answers[date];
+      if (a.bedtime === null || a.food === null) return toast('Answer both questions first', true);
+      try {
+        await api('/api/checkin', { memberId: me.id, pin, date, bedtimeYes: a.bedtime, foodYes: a.food });
+        me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+        toast('Saved! 🎉');
+        renderCheckin();
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
+/* ---------- Leaderboard ---------- */
+async function renderBoard() {
+  $('#sub').textContent = 'Who is winning?';
+  const board = await api('/api/leaderboard');
+  const period = boardPeriod;
+  const sorted = [...board.members].sort((a, b) =>
+    b.stats[period].perfect - a.stats[period].perfect ||
+    (b.stats[period].bedtime + b.stats[period].food) - (a.stats[period].bedtime + a.stats[period].food));
+  const medals = ['🥇', '🥈', '🥉'];
+  view.innerHTML = `<div class="card">
+    <div class="tabs">
+      ${['month', 'year', 'allTime'].map((p) =>
+        `<button data-p="${p}" class="${p === period ? 'sel' : ''}">${p === 'month' ? 'This month' : p === 'year' ? 'This year' : 'All time'}</button>`).join('')}
+    </div>
+    <table>
+      <tr><th></th><th>🛏️</th><th>🥦</th><th>⭐</th></tr>
+      ${sorted.map((m, i) => `<tr>
+        <td>${medals[i] ?? ''} ${m.name.split(' ')[0]}<br>
+          <span class="streak">🔥 ${m.stats.streaks.perfect.current} day streak (best ${m.stats.streaks.perfect.longest})</span></td>
+        <td>${m.stats[period].bedtime}</td>
+        <td>${m.stats[period].food}</td>
+        <td><b>${m.stats[period].perfect}</b></td>
+      </tr>`).join('')}
+    </table>
+    <p class="muted" style="margin-top:10px">🛏️ bedtime days · 🥦 food-goal days · ⭐ perfect days (both). Streaks count perfect days.</p>
+  </div>`;
+  view.querySelectorAll('.tabs button').forEach((b) =>
+    b.addEventListener('click', () => { boardPeriod = b.dataset.p; renderBoard(); }));
+}
+
+/* ---------- Profile ---------- */
+function renderProfile() {
+  $('#sub').textContent = 'Your settings';
+  const canEditBedtime = me.role !== 'kid';
+  view.innerHTML = `<div class="card">
+    <div class="row"><b>${me.name}</b><span class="badge">${me.role}</span></div>
+    <label>🛏️ Your bedtime</label>
+    <input type="text" id="bedtime" value="${me.bedtime}" ${canEditBedtime ? '' : 'disabled'}>
+    ${canEditBedtime ? '' : '<div class="muted" style="margin-top:4px">Only a parent can change your bedtime.</div>'}
+    <label>🥦 Food you're avoiding (your own goal)</label>
+    <input type="text" id="foodRule" value="${me.food_rule}">
+    <button class="primary" id="saveProfile">Save settings</button>
+    <button class="linkish" id="logout" style="margin-top:8px">Switch person</button>
+  </div>
+  ${me.role === 'admin' ? '<div class="card" id="adminCard"><b>👑 Admin: manage family</b><div id="adminList" class="muted" style="margin-top:8px">Loading…</div></div>' : ''}`;
+
+  $('#saveProfile').addEventListener('click', async () => {
+    try {
+      await api('/api/profile', {
+        memberId: me.id, pin,
+        foodRule: $('#foodRule').value,
+        ...(canEditBedtime ? { bedtime: $('#bedtime').value } : {}),
+      });
+      me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+      toast('Saved! 🎉');
+    } catch (e) { toast(e.message, true); }
+  });
+  $('#logout').addEventListener('click', logout);
+  if (me.role === 'admin') renderAdmin();
+}
+
+async function renderAdmin() {
+  const members = await api('/api/members');
+  $('#adminList').innerHTML = members.map((m) => `
+    <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
+      <div class="row"><b style="color:var(--text)">${m.name}</b><span class="badge">${m.role}</span></div>
+      <label>Bedtime</label><input type="text" class="a-bedtime" value="${m.bedtime}">
+      <label>New PIN (blank = keep)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••">
+      <button class="primary a-save" style="margin-top:8px">Update ${m.name.split(' ')[0]}</button>
+    </div>`).join('');
+  $('#adminList').querySelectorAll('[data-id]').forEach((row) => {
+    row.querySelector('.a-save').addEventListener('click', async () => {
+      try {
+        await api('/api/admin/member', {
+          adminId: me.id, pin, action: 'update',
+          member: {
+            id: Number(row.dataset.id),
+            bedtime: row.querySelector('.a-bedtime').value,
+            pin: row.querySelector('.a-pin').value || undefined,
+          },
+        });
+        toast('Updated! 🎉');
+        renderAdmin();
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
+/* ---------- Navigation ---------- */
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('sel', b.dataset.tab === t));
+  if (t === 'checkin') renderCheckin();
+  else if (t === 'board') renderBoard();
+  else renderProfile();
+}
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+
+/* ---------- Boot ---------- */
+(async () => {
+  if (memberId) {
+    try { await login(memberId, pin); return; } catch {}
+  }
+  showLogin();
+})();
+</script>
+</body>
+</html>

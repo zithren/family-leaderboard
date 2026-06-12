@@ -1,0 +1,40 @@
+# TEMPLATE — copy to wrangler.local.toml (gitignored) and fill in your values:
+#   cp wrangler.toml wrangler.local.toml
+# The npm scripts read wrangler.local.toml, so your database id, URL, and
+# timezone never end up in version control.
+
+name = "family-leaderboard"
+main = "src/index.js"
+compatibility_date = "2026-05-01"
+
+# Static frontend served from /public; the Worker handles /api/* routes.
+[assets]
+directory = "public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "family-leaderboard"
+# Replace with your database id after `npx wrangler d1 create family-leaderboard`
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# IANA timezone used to decide what "today" means for check-ins.
+FAMILY_TZ = "America/New_York"
+# How many days back a check-in may be logged before it locks in as "no".
+GRACE_DAYS = "3"
+# Your app's URL, used in reminder emails (set after your first deploy).
+APP_URL = "https://your-app.your-subdomain.workers.dev"
+
+# Daily reminder at 12:00 UTC (~8am US Eastern) and weekly summary Sunday 23:00 UTC.
+[triggers]
+crons = ["0 12 * * *", "0 23 * * SUN"]
+
+# Secrets (set with `wrangler secret put NAME`, or in .dev.vars locally):
+#   FAMILY_KEY_HASH - REQUIRED: SHA-256 hex of the shared family password.
+#                     The API serves nothing until this is set.
+#   RESEND_API_KEY  - for reminder/summary emails (optional; emails skipped if unset)
+#   MAIL_FROM       - verified sender address for Resend, e.g. "Leaderboard <board@yourdomain.com>"
+#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY - for push reminders (optional; generate
+#                     with `npm run vapid`; pushes skipped if unset)
+#   VAPID_SUBJECT   - contact for push services, e.g. "mailto:you@example.com" (optional)
