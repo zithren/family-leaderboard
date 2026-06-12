@@ -56,6 +56,10 @@ export async function handleApi(request, env) {
       return json(await leaderboard(env, today, graceDays));
     }
 
+    if (request.method === 'GET' && path === '/api/vapid') {
+      return json({ publicKey: env.VAPID_PUBLIC_KEY ?? null });
+    }
+
     if (request.method === 'GET' && path === '/api/me') {
       const member = await authMember(env, url.searchParams.get('memberId'), url.searchParams.get('pin'));
       if (!member) return err('Wrong PIN', 403);
@@ -75,6 +79,7 @@ export async function handleApi(request, env) {
         food_rule: member.food_rule,
         chores_rule: member.chores_rule,
         email: member.email,
+        push: !!member.push_subscription,
         today,
         days: dates.filter((d) => d >= start).map((d) => ({ date: d, entry: byDate[d] ?? null })),
       });
@@ -117,6 +122,19 @@ export async function handleApi(request, env) {
         if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right', 400);
         await env.DB.prepare('UPDATE members SET email = ? WHERE id = ?')
           .bind(email || null, member.id).run();
+      }
+      if ('pushSubscription' in body) {
+        let value = null;
+        if (body.pushSubscription) {
+          try {
+            if (!JSON.parse(body.pushSubscription)?.endpoint) throw new Error();
+            value = body.pushSubscription;
+          } catch {
+            return err('Invalid push subscription', 400);
+          }
+        }
+        await env.DB.prepare('UPDATE members SET push_subscription = ? WHERE id = ?')
+          .bind(value, member.id).run();
       }
       return json({ ok: true });
     }

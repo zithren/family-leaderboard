@@ -1,5 +1,6 @@
 import { todayInTZ, addDays, loggableDates, prevMonthPrefix } from './stats.js';
 import { leaderboard } from './api.js';
+import { sendPush } from './push.js';
 
 /** Rank members by last month's perfect days (ties broken by total yes-days). */
 export function lastMonthRanking(members) {
@@ -34,7 +35,7 @@ export async function sendDailyReminders(env) {
   const windowStart = loggableDates(today, graceDays)[0];
 
   const { results: members } = await env.DB.prepare(
-    'SELECT id, name, email, start_date FROM members WHERE email IS NOT NULL'
+    'SELECT id, name, email, push_subscription, start_date FROM members WHERE email IS NOT NULL OR push_subscription IS NOT NULL'
   ).all();
 
   for (const m of members) {
@@ -47,6 +48,14 @@ export async function sendDailyReminders(env) {
       if (!logged.has(d)) missing.push(d);
     }
     if (missing.length === 0) continue;
+
+    if (m.push_subscription) {
+      const result = await sendPush(env, m.push_subscription);
+      if (result === 'gone') {
+        await env.DB.prepare('UPDATE members SET push_subscription = NULL WHERE id = ?').bind(m.id).run();
+      }
+    }
+    if (!m.email) continue;
 
     const expiring = missing[0] === windowStart;
     const subject = expiring

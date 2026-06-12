@@ -498,6 +498,9 @@ function renderProfile() {
     <label>📧 Email for reminders (optional)</label>
     <input type="email" id="email" value="${me.email ?? ''}" placeholder="you@example.com">
     <div class="muted" style="margin-top:4px">Daily nudges and the weekly leaderboard land here. Leave blank for no emails.</div>
+    <label>🔔 Push reminders on this phone</label>
+    <button id="pushToggle" style="width:100%">${me.push ? 'On — tap to turn off' : 'Off — tap to turn on'}</button>
+    <div class="muted" id="pushHint" style="margin-top:4px">A daily nudge when you have days left to log. Your phone will ask permission first.</div>
     <button class="primary" id="saveProfile">Save settings</button>
     <button class="linkish" id="logout" style="margin-top:8px">Switch person</button>
   </div>
@@ -526,6 +529,7 @@ function renderProfile() {
     } catch (e) { toast(e.message, true); }
   });
   $('#logout').addEventListener('click', logout);
+  $('#pushToggle').addEventListener('click', () => (me.push ? disablePush() : enablePush()));
   if (me.role === 'admin') {
     $('#saveFamilyKey').addEventListener('click', async () => {
       const newKey = $('#newFamilyKey').value;
@@ -623,6 +627,43 @@ async function renderAdmin() {
       renderAdmin();
     } catch (e) { toast(e.message, true); }
   });
+}
+
+/* ---------- Push reminders (per device, opt-in) ---------- */
+async function refreshMe() {
+  me = await api(`/api/me?memberId=${me.id}&pin=${encodeURIComponent(pin)}`);
+}
+
+async function enablePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    const ios = /iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone;
+    return toast(ios ? 'First add this app to your Home Screen (Share → Add to Home Screen)' : 'Push not supported in this browser', true);
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    if ((await Notification.requestPermission()) !== 'granted') {
+      return toast('Notifications were not allowed', true);
+    }
+    const { publicKey } = await api('/api/vapid');
+    if (!publicKey) return toast('Push is not configured on the server yet', true);
+    const keyBytes = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes });
+    await api('/api/profile', { memberId: me.id, pin, pushSubscription: JSON.stringify(sub) });
+    await refreshMe();
+    toast('🔔 Daily reminders on');
+    renderProfile();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await (await reg?.pushManager.getSubscription())?.unsubscribe();
+    await api('/api/profile', { memberId: me.id, pin, pushSubscription: null });
+    await refreshMe();
+    toast('Push reminders off');
+    renderProfile();
+  } catch (e) { toast(e.message, true); }
 }
 
 /** Non-admin adults can set each kid's chores. */

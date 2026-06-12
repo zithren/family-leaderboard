@@ -9,6 +9,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "node --test",
+    "vapid": "node scripts/generate-vapid.mjs",
     "db:schema": "wrangler d1 execute family-leaderboard --local --file=schema.sql",
     "db:seed": "wrangler d1 execute family-leaderboard --local --file=seed.example.sql",
     "db:seed:local": "wrangler d1 execute family-leaderboard --local --file=seed.local.sql",

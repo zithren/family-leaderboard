@@ -21,6 +21,7 @@ for a family.
 - 👑 **Admin corrections** — the admin can tap any past day in the calendar to fix it, even beyond the grace window
 - 🏆 **Monthly champion** — a banner during the first week of each month (and an email on the 1st) crowns last month's winner
 - 📧 **Reminders** — daily email nudge for unanswered days and a weekly leaderboard email (via [Resend](https://resend.com), free tier), both optional
+- 🔔 **Push reminders** — per-device opt-in from each profile (Web Push, free); on iPhone the app must be added to the Home Screen first
 - 🔒 **Privacy** — all personal data lives only in *your* database; this repo contains none
 
 ## Quick start (local)
@@ -68,6 +69,21 @@ Run the logic tests with `npm test`.
 6. Update `APP_URL` in `wrangler.toml` to your `*.workers.dev` URL and deploy again.
 7. Everyone opens the URL on their phone, enters the family password once,
    then Share → **Add to Home Screen**.
+
+### Optional: push reminders
+
+1. Generate a VAPID keypair and store it as secrets:
+   ```sh
+   npm run vapid
+   npx wrangler secret put VAPID_PUBLIC_KEY
+   npx wrangler secret put VAPID_PRIVATE_KEY
+   npx wrangler secret put VAPID_SUBJECT     # e.g. mailto:you@example.com
+   ```
+2. Each person turns on "🔔 Push reminders" on their own profile page — it's
+   per device and off by default. iPhones must add the app to the Home Screen
+   first (Share → Add to Home Screen); the app explains this if needed.
+3. The daily cron sends a push only to people who still have unanswered days.
+   Without the secrets set, pushes are skipped silently.
 
 ### Optional: email reminders
 
