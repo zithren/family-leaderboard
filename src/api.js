@@ -293,25 +293,9 @@ export async function handleApi(request, env) {
       if (!actor || actor.role === 'kid') return err('Admin access required', 403);
       const m = body.member ?? {};
 
-      // Non-admin adults get two powers here: setting any kid's chores, and
-      // setting anyone's outside/exercise question.
-      if (actor.role === 'adult') {
-        if (body.action !== 'update') return err('Admin access required', 403);
-        const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(m.id).first();
-        if (!target) return err('No such member', 404);
-        const chores = m.chores?.trim();
-        const outside = m.outside?.trim();
-        if (!chores && !outside) return err('Nothing to update', 400);
-        if (tooLong(chores, LIMITS.rule) || tooLong(outside, LIMITS.rule)) return err('That text is too long', 400);
-        if (chores && target.role !== 'kid') return err("Adults can only edit kids' chores", 403);
-        if (chores) {
-          await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?').bind(chores, m.id).run();
-        }
-        if (outside) {
-          await env.DB.prepare('UPDATE members SET outside_rule = ? WHERE id = ?').bind(outside, m.id).run();
-        }
-        return json({ ok: true });
-      }
+      // Only the admin can edit other members. Adults manage their own goals
+      // through /api/profile; kids' goals are admin-set.
+      if (actor.role !== 'admin') return err('Admin access required', 403);
 
       if (badMemberFields(m)) return err('One of those fields is too long', 400);
 

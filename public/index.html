@@ -583,9 +583,7 @@ function renderProfile() {
            <button class="primary" type="submit">Change password</button>
          </form>
        </div>`
-    : me.role === 'adult'
-      ? '<div class="card"><b>👨‍👩‍👧 Family goals</b><div class="muted" style="margin-top:4px">Set anyone’s outside &amp; exercise question, and kids’ chores.</div><div id="kidChores" class="muted" style="margin-top:8px">Loading…</div></div>'
-      : ''}`;
+    : ''}`;
 
   $('#saveProfile').addEventListener('click', async () => {
     try {
@@ -619,7 +617,7 @@ function renderProfile() {
       } catch (e) { toast(e.message, true); }
     });
     renderAdmin();
-  } else if (me.role === 'adult') renderKidChores();
+  }
 }
 
 const roleSelect = (cls, selected) => `<select class="${cls}">
@@ -744,35 +742,6 @@ async function disablePush() {
     toast('Push reminders off');
     renderProfile();
   } catch (e) { toast(e.message, true); }
-}
-
-/** Non-admin adults: set anyone's outside/exercise question, and kids' chores. */
-async function renderKidChores() {
-  const members = await api('/api/members');
-  $('#kidChores').innerHTML = members.map((m) => `
-    <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
-      <div class="row"><b style="color:var(--text)">${esc(m.name)}</b><span class="badge">${m.role}</span></div>
-      <label>🌳 Outside &amp; exercise question</label>
-      <input type="text" class="k-outside" value="${esc(m.outside_rule)}">
-      ${m.role === 'kid' ? `<label>🧹 Chores</label><input type="text" class="k-chores" value="${esc(m.chores_rule)}">` : ''}
-      <button class="primary k-save" style="margin-top:8px">Update ${esc(m.name.split(' ')[0])}</button>
-    </div>`).join('');
-  $('#kidChores').querySelectorAll('[data-id]').forEach((row) => {
-    row.querySelector('.k-save').addEventListener('click', async () => {
-      try {
-        await api('/api/admin/member', {
-          adminId: me.id, pin, action: 'update',
-          member: {
-            id: Number(row.dataset.id),
-            outside: row.querySelector('.k-outside').value,
-            ...(row.querySelector('.k-chores') ? { chores: row.querySelector('.k-chores').value } : {}),
-          },
-        });
-        toast('Updated! 🎉');
-        renderKidChores();
-      } catch (e) { toast(e.message, true); }
-    });
-  });
 }
 
 /* ---------- Navigation ---------- */
