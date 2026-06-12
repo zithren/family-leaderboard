@@ -328,7 +328,7 @@ export async function handleApi(request, env) {
             m.chores?.trim() || 'daily chores',
             m.outside?.trim() || 'Went outside for 30+ minutes',
             m.pin ? await sha256Hex(String(m.pin)) : null,
-            today   // starts today; their first check-in is tomorrow, about today
+            addDays(today, -1)   // starts yesterday, so there's a card to log right away
           ).run();
         } catch (e) {
           if (String(e.message).includes('UNIQUE')) return err('That name is already taken', 400);
