@@ -25,6 +25,17 @@ async function authMember(env, memberId, pin) {
 const PUBLIC_FIELDS = 'id, name, role, bedtime, food_rule, pin_hash IS NOT NULL AS has_pin';
 
 export async function handleApi(request, env) {
+  // Every API route requires the shared family password (sent as a header,
+  // checked against a hash stored as a Worker secret). Fail closed if the
+  // secret was never configured.
+  if (!env.FAMILY_KEY_HASH) {
+    return err('Server not configured: set the FAMILY_KEY_HASH secret (see README)', 503);
+  }
+  const familyKey = request.headers.get('X-Family-Key');
+  if (!familyKey || (await sha256Hex(familyKey)) !== env.FAMILY_KEY_HASH.toLowerCase()) {
+    return err('Family password required', 401);
+  }
+
   const url = new URL(request.url);
   const path = url.pathname;
   const today = todayInTZ(env.FAMILY_TZ);

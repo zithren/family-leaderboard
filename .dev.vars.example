@@ -1,0 +1,9 @@
+# Copy to .dev.vars (gitignored) for local development.
+# FAMILY_KEY_HASH is the SHA-256 hex of your shared family password.
+# This example hash is for the password "example":
+#   echo -n "example" | shasum -a 256
+FAMILY_KEY_HASH=50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c
+
+# Optional, for reminder emails:
+# RESEND_API_KEY=re_...
+# MAIL_FROM=Leaderboard <onboarding@resend.dev>

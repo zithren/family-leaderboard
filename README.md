@@ -25,12 +25,13 @@ Requires Node 20+.
 
 ```sh
 npm install
+cp .dev.vars.example .dev.vars   # local family password is "example"
 npm run db:schema     # create tables in a local D1 database
 npm run db:seed       # load the fictional example family
 npm run dev           # http://localhost:8787
 ```
 
-Example PINs: Alex `1111`, Bailey `2222`, all kids `0000`.
+Family password: `example`. Example PINs: Alex `1111`, Bailey `2222`, all kids `0000`.
 
 Run the logic tests with `npm test`.
 
@@ -48,14 +49,21 @@ Run the logic tests with `npm test`.
    # edit seed.local.sql with your family's names, emails, roles, bedtimes, food rules.
    # pin_hash is the SHA-256 of the PIN:  echo -n "1234" | shasum -a 256
    ```
-4. Set your timezone in `wrangler.toml` (`FAMILY_TZ`), then:
+4. Set the shared family password (required — the API refuses to serve anything
+   without it). Hash it and store it as a secret:
+   ```sh
+   echo -n "your-family-password" | shasum -a 256   # copy the hex
+   npx wrangler secret put FAMILY_KEY_HASH           # paste the hex
+   ```
+5. Set your timezone in `wrangler.toml` (`FAMILY_TZ`), then:
    ```sh
    npm run db:schema:remote
    npm run db:seed:local:remote
    npm run deploy
    ```
-5. Update `APP_URL` in `wrangler.toml` to your `*.workers.dev` URL and deploy again.
-6. Everyone opens the URL on their phone → Share → **Add to Home Screen**.
+6. Update `APP_URL` in `wrangler.toml` to your `*.workers.dev` URL and deploy again.
+7. Everyone opens the URL on their phone, enters the family password once,
+   then Share → **Add to Home Screen**.
 
 ### Optional: email reminders
 
@@ -76,12 +84,23 @@ Run the logic tests with `npm test`.
 - "Perfect days" ⭐ = both questions answered yes on the same day. Streaks shown on the board count perfect days.
 - Days before a member's `start_date` are ignored, so late joiners aren't penalized.
 
-## Privacy model
+## Privacy & access model
 
-The repo ships only with fictional example data (`seed.example.sql`). Real names,
-emails, bedtimes, PINs, and food rules go in `seed.local.sql` and `.dev.vars`, both
-gitignored — they exist only on your machine and in your Cloudflare database. PINs are
-stored as SHA-256 hashes; they're a sibling-proofing measure, not bank-grade security.
+- **Repo**: ships only with fictional example data (`seed.example.sql`). Real names,
+  emails, bedtimes, PINs, and food rules go in `seed.local.sql` and `.dev.vars`, both
+  gitignored — they exist only on your machine and in your Cloudflare database.
+- **Deployed app**: every API route requires the shared family password, verified
+  server-side against a hash stored as a Worker secret (`FAMILY_KEY_HASH`). Without
+  it, strangers who find the URL get a lock screen and `401`s — no names, no data.
+  The server fails closed if the secret isn't configured. The static page itself
+  contains no personal data, is marked `noindex`, and `robots.txt` blocks crawlers.
+- **Database**: D1 is only reachable through the Worker; there is no public endpoint.
+  Traffic is HTTPS end to end.
+- **PINs** distinguish family members from each other (sibling-proofing); the family
+  password keeps outsiders away. Both are stored as SHA-256 hashes, suitable for a
+  family scoreboard — this is deliberately not bank-grade auth. If you want stronger
+  protection, put the Worker behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+  (free for up to 50 users) for email-verified logins.
 
 ## License
 

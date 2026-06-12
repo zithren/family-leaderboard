@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a1a2e">
+<meta name="robots" content="noindex, nofollow">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <title>Family Leaderboard</title>
@@ -96,6 +97,7 @@ const view = $('#view');
 let me = null;                       // {id, name, role, bedtime, food_rule, today, days}
 let pin = localStorage.getItem('pin') || '';
 let memberId = localStorage.getItem('memberId') || '';
+let familyKey = localStorage.getItem('familyKey') || '';
 let tab = 'checkin';
 let boardPeriod = 'month';
 
@@ -107,14 +109,39 @@ function toast(msg, isError = false) {
 }
 
 async function api(path, opts) {
-  const res = await fetch(path, opts && {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opts),
+  const res = await fetch(path, {
+    headers: { 'X-Family-Key': familyKey, ...(opts && { 'Content-Type': 'application/json' }) },
+    ...(opts && { method: 'POST', body: JSON.stringify(opts) }),
   });
   const data = await res.json();
+  if (res.status === 401) {
+    familyKey = '';
+    localStorage.removeItem('familyKey');
+    showGate();
+    throw new Error(data.error);
+  }
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
+}
+
+/* ---------- Family gate ---------- */
+function showGate() {
+  $('#nav').classList.add('hidden');
+  $('#sub').textContent = 'Family members only';
+  view.innerHTML = `<div class="card"><div class="muted">🔒 Enter the family password</div>
+    <input class="pin-input" id="familyKey" type="password" autocomplete="off" style="letter-spacing:normal;font-size:1.1rem">
+    <button class="primary" id="enter">Enter</button></div>`;
+  $('#familyKey').focus();
+  const tryKey = async () => {
+    familyKey = $('#familyKey').value;
+    try {
+      await api('/api/members');
+      localStorage.setItem('familyKey', familyKey);
+      showLogin();
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#enter').addEventListener('click', tryKey);
+  $('#familyKey').addEventListener('keydown', (e) => e.key === 'Enter' && tryKey());
 }
 
 function fmtDay(dateStr, today) {
@@ -322,10 +349,11 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
 
 /* ---------- Boot ---------- */
 (async () => {
+  if (!familyKey) { showGate(); return; }
   if (memberId) {
     try { await login(memberId, pin); return; } catch {}
   }
-  showLogin();
+  if (familyKey) showLogin();   // a 401 in login() already routed to the gate
 })();
 </script>
 </body>
