@@ -22,17 +22,22 @@ async function authMember(env, memberId, pin) {
   return member;
 }
 
-const PUBLIC_FIELDS = 'id, name, role, bedtime, food_rule, chores_rule, pin_hash IS NOT NULL AS has_pin';
+// Visible to anyone past the family-password gate (i.e. the family).
+const PUBLIC_FIELDS = 'id, name, email, role, bedtime, food_rule, chores_rule, pin_hash IS NOT NULL AS has_pin';
 
 export async function handleApi(request, env) {
-  // Every API route requires the shared family password (sent as a header,
-  // checked against a hash stored as a Worker secret). Fail closed if the
-  // secret was never configured.
-  if (!env.FAMILY_KEY_HASH) {
+  // Every API route requires the shared family password. The hash lives in
+  // the settings table once the admin changes it in-app; the FAMILY_KEY_HASH
+  // secret is the bootstrap value. Fail closed if neither is configured.
+  const override = await env.DB.prepare(
+    "SELECT value FROM settings WHERE key = 'family_key_hash'"
+  ).first().catch(() => null);
+  const keyHash = override?.value ?? env.FAMILY_KEY_HASH;
+  if (!keyHash) {
     return err('Server not configured: set the FAMILY_KEY_HASH secret (see README)', 503);
   }
   const familyKey = request.headers.get('X-Family-Key');
-  if (!familyKey || (await sha256Hex(familyKey)) !== env.FAMILY_KEY_HASH.toLowerCase()) {
+  if (!familyKey || (await sha256Hex(familyKey)) !== keyHash.toLowerCase()) {
     return err('Family password required', 401);
   }
 
@@ -56,7 +61,7 @@ export async function handleApi(request, env) {
       if (!member) return err('Wrong PIN', 403);
       const dates = loggableDates(today, graceDays);
       const { results: entries } = await env.DB.prepare(
-        'SELECT date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins WHERE member_id = ? AND date >= ?'
+        'SELECT date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date >= ?'
       ).bind(member.id, dates[0]).all();
       const byDate = Object.fromEntries(entries.map((e) => [e.date, e]));
       // Clamp: SQLite's date('now') is UTC, so a freshly seeded start_date can
@@ -69,6 +74,7 @@ export async function handleApi(request, env) {
         bedtime: member.bedtime,
         food_rule: member.food_rule,
         chores_rule: member.chores_rule,
+        email: member.email,
         today,
         days: dates.filter((d) => d >= start).map((d) => ({ date: d, entry: byDate[d] ?? null })),
       });
@@ -106,6 +112,26 @@ export async function handleApi(request, env) {
         await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
           .bind(body.chores.trim(), member.id).run();
       }
+      if (typeof body.email === 'string') {
+        const email = body.email.trim();
+        if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right', 400);
+        await env.DB.prepare('UPDATE members SET email = ? WHERE id = ?')
+          .bind(email || null, member.id).run();
+      }
+      return json({ ok: true });
+    }
+
+    // Admin changes the shared family password from the app; the new hash is
+    // stored in settings and overrides the bootstrap FAMILY_KEY_HASH secret.
+    if (request.method === 'POST' && path === '/api/admin/familykey') {
+      const body = await request.json();
+      const actor = await authMember(env, body.adminId, body.pin);
+      if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
+      const newKey = String(body.newKey ?? '');
+      if (newKey.length < 6) return err('Family password must be at least 6 characters', 400);
+      await env.DB.prepare(
+        "INSERT INTO settings (key, value) VALUES ('family_key_hash', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"
+      ).bind(await sha256Hex(newKey)).run();
       return json({ ok: true });
     }
 
@@ -131,7 +157,7 @@ export async function handleApi(request, env) {
       const month = url.searchParams.get('month') ?? today.slice(0, 7);
       if (!/^\d{4}-\d{2}$/.test(month)) return err('Invalid month', 400);
       const { results: entries } = await env.DB.prepare(
-        "SELECT date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins WHERE member_id = ? AND date LIKE ?"
+        "SELECT date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date LIKE ?"
       ).bind(member.id, month + '-%').all();
       const byDate = new Map(entries.map((e) => [e.date, e]));
       const [y, m] = month.split('-').map(Number);
@@ -144,6 +170,7 @@ export async function handleApi(request, env) {
           bedtime: dayStatus(entry, d, today, graceDays, 'bedtime_yes'),
           food: dayStatus(entry, d, today, graceDays, 'food_yes'),
           chores: dayStatus(entry, d, today, graceDays, 'chores_yes'),
+          outside: dayStatus(entry, d, today, graceDays, 'outside_yes'),
         };
         days.push({
           date: d,
@@ -151,7 +178,7 @@ export async function handleApi(request, env) {
           vacation: !!entry?.vacation,
           logged: !!entry,
           entry: entry && !entry.vacation
-            ? { bedtime: !!entry.bedtime_yes, food: !!entry.food_yes, chores: !!entry.chores_yes }
+            ? { bedtime: !!entry.bedtime_yes, food: !!entry.food_yes, chores: !!entry.chores_yes, outside: !!entry.outside_yes }
             : null,
           statuses,
         });
@@ -251,19 +278,21 @@ async function saveCheckin(env, memberId, date, body) {
     return json({ ok: true });
   }
   const vacation = body.vacation === true;
-  if (!vacation && [body.bedtimeYes, body.foodYes, body.choresYes].some((v) => typeof v !== 'boolean')) {
-    return err('bedtimeYes, foodYes and choresYes must be true or false', 400);
+  if (!vacation && [body.bedtimeYes, body.foodYes, body.choresYes, body.outsideYes].some((v) => typeof v !== 'boolean')) {
+    return err('bedtimeYes, foodYes, choresYes and outsideYes must be true or false', 400);
   }
   await env.DB.prepare(
-    `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes, vacation) VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation) VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (member_id, date) DO UPDATE SET
        bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes,
-       chores_yes = excluded.chores_yes, vacation = excluded.vacation, logged_at = datetime('now')`
+       chores_yes = excluded.chores_yes, outside_yes = excluded.outside_yes,
+       vacation = excluded.vacation, logged_at = datetime('now')`
   ).bind(
     memberId, date,
     !vacation && body.bedtimeYes ? 1 : 0,
     !vacation && body.foodYes ? 1 : 0,
     !vacation && body.choresYes ? 1 : 0,
+    !vacation && body.outsideYes ? 1 : 0,
     vacation ? 1 : 0
   ).run();
   return json({ ok: true });
@@ -278,7 +307,7 @@ async function adminCount(env) {
 export async function leaderboard(env, today, graceDays) {
   const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
   const { results: entries } = await env.DB.prepare(
-    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, vacation FROM checkins'
+    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins'
   ).all();
   const byMember = new Map();
   for (const e of entries) {

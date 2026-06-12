@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS checkins (
   bedtime_yes INTEGER NOT NULL CHECK (bedtime_yes IN (0, 1)),
   food_yes INTEGER NOT NULL CHECK (food_yes IN (0, 1)),
   chores_yes INTEGER NOT NULL CHECK (chores_yes IN (0, 1)),
+  outside_yes INTEGER NOT NULL CHECK (outside_yes IN (0, 1)),
   -- Vacation days don't count for or against anyone (travel, sleepovers, holidays).
   vacation INTEGER NOT NULL DEFAULT 0 CHECK (vacation IN (0, 1)),
   logged_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -28,3 +29,9 @@ CREATE TABLE IF NOT EXISTS checkins (
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkins_member_date ON checkins (member_id, date);
+
+-- App settings (e.g. family_key_hash once the admin changes the password in-app).
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

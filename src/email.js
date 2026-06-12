@@ -3,7 +3,7 @@ import { leaderboard } from './api.js';
 
 /** Rank members by last month's perfect days (ties broken by total yes-days). */
 export function lastMonthRanking(members) {
-  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores;
+  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores + m.stats.lastMonth.outside;
   return [...members].sort(
     (a, b) => b.stats.lastMonth.perfect - a.stats.lastMonth.perfect || score(b) - score(a)
   );
@@ -70,7 +70,7 @@ export async function sendMonthlyWinner(env) {
   const ranked = lastMonthRanking(board.members);
   const top = ranked[0];
   if (!top) return;
-  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores;
+  const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores + m.stats.lastMonth.outside;
   if (top.stats.lastMonth.perfect === 0 && score(top) === 0) return; // nothing happened last month
 
   const winners = ranked.filter(
@@ -101,7 +101,7 @@ export async function sendWeeklySummary(env) {
   const graceDays = parseInt(env.GRACE_DAYS, 10) || 3;
   const board = await leaderboard(env, today, graceDays);
 
-  const score = (m) => m.stats.month.bedtime + m.stats.month.food + m.stats.month.chores;
+  const score = (m) => m.stats.month.bedtime + m.stats.month.food + m.stats.month.chores + m.stats.month.outside;
   const sorted = [...board.members].sort(
     (a, b) => b.stats.month.perfect - a.stats.month.perfect || score(b) - score(a)
   );
@@ -112,6 +112,7 @@ export async function sendWeeklySummary(env) {
       <td style="padding:6px 12px;text-align:center">${m.stats.month.bedtime}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.food}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.chores}</td>
+      <td style="padding:6px 12px;text-align:center">${m.stats.month.outside}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.perfect}</td>
       <td style="padding:6px 12px;text-align:center">🔥 ${m.stats.streaks.perfect.current}</td>
     </tr>`).join('');
@@ -119,8 +120,8 @@ export async function sendWeeklySummary(env) {
     <h2>🏆 Family Leaderboard — week of ${today}</h2>
     <table style="border-collapse:collapse;font-family:sans-serif">
       <tr><th></th><th style="padding:6px 12px">🛏️ Bedtime</th><th style="padding:6px 12px">🥦 Food</th>
-          <th style="padding:6px 12px">🧹 Chores</th><th style="padding:6px 12px">⭐ Perfect</th>
-          <th style="padding:6px 12px">Streak</th></tr>
+          <th style="padding:6px 12px">🧹 Chores</th><th style="padding:6px 12px">🌳 Outside</th>
+          <th style="padding:6px 12px">⭐ Perfect</th><th style="padding:6px 12px">Streak</th></tr>
       ${rows}
     </table>
     <p style="font-family:sans-serif">Counts are for this month. <a href="${env.APP_URL}">See the full board</a>.</p>`;

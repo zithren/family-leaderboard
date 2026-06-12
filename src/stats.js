@@ -59,7 +59,7 @@ export function dayStatus(entry, date, today, graceDays, key) {
  *   pendingDates: [YYYY-MM-DD, ...]   // loggable days not yet answered
  * }
  */
-const QUESTION_KEYS = { bedtime: 'bedtime_yes', food: 'food_yes', chores: 'chores_yes' };
+const QUESTION_KEYS = { bedtime: 'bedtime_yes', food: 'food_yes', chores: 'chores_yes', outside: 'outside_yes' };
 
 /** Perfect = every question yes; any answered/locked no sinks the day. */
 function perfectStatus(statuses) {
@@ -75,12 +75,13 @@ export function memberStats(member, entries, today, graceDays) {
   const lastMonth = prevMonthPrefix(today);
   const yearPrefix = today.slice(0, 4);
 
-  const zero = () => ({ bedtime: 0, food: 0, chores: 0, perfect: 0 });
+  const zero = () => ({ bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0 });
   const totals = { month: zero(), lastMonth: zero(), year: zero(), allTime: zero() };
   const streaks = {
     bedtime: { current: 0, longest: 0 },
     food: { current: 0, longest: 0 },
     chores: { current: 0, longest: 0 },
+    outside: { current: 0, longest: 0 },
     perfect: { current: 0, longest: 0 },
   };
   const pendingDates = [];
@@ -90,7 +91,7 @@ export function memberStats(member, entries, today, graceDays) {
 
   // Forward pass: tallies and longest streaks. Pending days neither extend
   // nor break a streak; locked-in or answered 'no' days break it.
-  const run = { bedtime: 0, food: 0, chores: 0, perfect: 0 };
+  const run = { bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0 };
   for (let d = start; d <= today; d = addDays(d, 1)) {
     const entry = byDate.get(d);
     const statuses = Object.entries(QUESTION_KEYS).map(

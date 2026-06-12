@@ -5,9 +5,9 @@ import { addDays, loggableDates, dayStatus, memberStats, prevMonthPrefix } from 
 const TODAY = '2026-06-11';
 const GRACE = 3;
 const member = { start_date: '2026-06-01' };
-const entry = (date, bedtime, food, chores = true) =>
-  ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0, chores_yes: chores ? 1 : 0, vacation: 0 });
-const vacation = (date) => ({ date, bedtime_yes: 0, food_yes: 0, chores_yes: 0, vacation: 1 });
+const entry = (date, bedtime, food, chores = true, outside = true) =>
+  ({ date, bedtime_yes: bedtime ? 1 : 0, food_yes: food ? 1 : 0, chores_yes: chores ? 1 : 0, outside_yes: outside ? 1 : 0, vacation: 0 });
+const vacation = (date) => ({ date, bedtime_yes: 0, food_yes: 0, chores_yes: 0, outside_yes: 0, vacation: 1 });
 
 test('addDays crosses month boundaries', () => {
   assert.equal(addDays('2026-06-01', -1), '2026-05-31');
@@ -101,6 +101,19 @@ test('pendingDates lists unanswered loggable past days, not today', () => {
   const entries = [entry('2026-06-09', true, true)];
   const s = memberStats(member, entries, TODAY, GRACE);
   assert.deepEqual(s.pendingDates, ['2026-06-08', '2026-06-10']);
+});
+
+test('an outside miss sinks the perfect day but not other streaks', () => {
+  const entries = [
+    entry('2026-06-09', true, true, true, true),
+    entry('2026-06-10', true, true, true, false), // stayed in yesterday
+  ];
+  const s = memberStats(member, entries, TODAY, GRACE);
+  assert.equal(s.month.outside, 1);
+  assert.equal(s.month.perfect, 1);
+  assert.equal(s.streaks.outside.current, 0);
+  assert.equal(s.streaks.bedtime.current, 2);
+  assert.equal(s.streaks.perfect.current, 0);
 });
 
 test('vacation days bridge streaks and count for nothing', () => {
