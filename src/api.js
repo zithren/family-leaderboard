@@ -147,7 +147,7 @@ export async function handleApi(request, env) {
           m.bedtime?.trim() || '9:00 PM', m.foodRule?.trim() || 'junk food',
           m.chores?.trim() || 'daily chores',
           m.pin ? await sha256Hex(String(m.pin)) : null,
-          addDays(today, -1)   // start yesterday so there is always a day to log
+          addDays(today, -graceDays)   // open the full grace window from day one
         ).run();
         return json({ ok: true });
       }

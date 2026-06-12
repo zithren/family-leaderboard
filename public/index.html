@@ -350,7 +350,7 @@ async function renderAdmin() {
       <label>Chores</label><input type="text" class="a-chores" value="${m.chores_rule}">
       <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
-        <input type="checkbox" class="a-nopin" style="width:auto" ${m.has_pin ? '' : 'checked disabled'}>
+        <input type="checkbox" class="a-nopin" style="width:auto" ${m.has_pin ? '' : 'checked'}>
         No PIN — ${m.name.split(' ')[0]} logs in with one tap
       </label>
       <button class="primary a-save" style="margin-top:8px">Update ${m.name.split(' ')[0]}</button>
