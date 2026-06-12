@@ -177,7 +177,7 @@ async function showLogin(preselect) {
   }
 }
 
-async function login(id, pinValue) {
+async function login(id, pinValue, { silent = false } = {}) {
   try {
     me = await api(`/api/me?memberId=${id}&pin=${encodeURIComponent(pinValue)}`);
     memberId = id; pin = pinValue;
@@ -185,8 +185,10 @@ async function login(id, pinValue) {
     localStorage.setItem('pin', pinValue);
     $('#nav').classList.remove('hidden');
     setTab('checkin');
+    return true;
   } catch (e) {
-    toast(e.message, true);
+    if (!silent) toast(e.message, true);
+    return false;
   }
 }
 
@@ -350,9 +352,11 @@ document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click
 /* ---------- Boot ---------- */
 (async () => {
   if (!familyKey) { showGate(); return; }
-  if (memberId) {
-    try { await login(memberId, pin); return; } catch {}
-  }
+  if (memberId && (await login(memberId, pin, { silent: true }))) return;
+  // Stored identity no longer valid (e.g. a PIN was added) — forget it.
+  localStorage.removeItem('memberId');
+  localStorage.removeItem('pin');
+  memberId = ''; pin = '';
   if (familyKey) showLogin();   // a 401 in login() already routed to the gate
 })();
 </script>
