@@ -2,6 +2,10 @@ import { todayInTZ, addDays, loggableDates, prevMonthPrefix } from './stats.js';
 import { leaderboard } from './api.js';
 import { sendPush } from './push.js';
 
+/** Escape member-entered text before embedding it in email HTML. */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 /** Rank members by last month's perfect days (ties broken by total yes-days). */
 export function lastMonthRanking(members) {
   const score = (m) => m.stats.lastMonth.bedtime + m.stats.lastMonth.food + m.stats.lastMonth.chores + m.stats.lastMonth.outside;
@@ -62,7 +66,7 @@ export async function sendDailyReminders(env) {
       ? `⏰ Last chance to log ${missing[0]} — it becomes a "no" tomorrow!`
       : '🛏️ How did yesterday go? Log your bedtime & food check-in';
     const html = `
-      <p>Hi ${m.name},</p>
+      <p>Hi ${esc(m.name)},</p>
       <p>You have ${missing.length === 1 ? 'a day' : `${missing.length} days`} waiting to be logged:
       <b>${missing.join(', ')}</b>.</p>
       ${expiring ? `<p><b>Heads up:</b> ${missing[0]} locks in as a "no" after today.</p>` : ''}
@@ -85,7 +89,7 @@ export async function sendMonthlyWinner(env) {
   const winners = ranked.filter(
     (m) => m.stats.lastMonth.perfect === top.stats.lastMonth.perfect && score(m) === score(top)
   );
-  const names = winners.map((w) => w.name).join(' & ');
+  const names = winners.map((w) => esc(w.name)).join(' & ');
   const monthName = new Date(prevMonthPrefix(today) + '-01T00:00:00').toLocaleDateString('en-US', {
     month: 'long', year: 'numeric',
   });
@@ -117,7 +121,7 @@ export async function sendWeeklySummary(env) {
   const medals = ['🥇', '🥈', '🥉'];
   const rows = sorted.map((m, i) => `
     <tr>
-      <td style="padding:6px 12px">${medals[i] ?? ''} <b>${m.name}</b></td>
+      <td style="padding:6px 12px">${medals[i] ?? ''} <b>${esc(m.name)}</b></td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.bedtime}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.food}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.chores}</td>

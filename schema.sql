@@ -35,3 +35,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Failed family-password attempts, for rate limiting brute force.
+CREATE TABLE IF NOT EXISTS auth_failures (
+  ip TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_failures ON auth_failures (ip, ts);

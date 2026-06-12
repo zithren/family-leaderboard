@@ -13,6 +13,16 @@ export async function sha256Hex(text) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Parse a JSON object body; null for anything else (bad JSON, arrays, primitives). */
+async function readBody(request) {
+  try {
+    const body = await request.json();
+    return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Look up a member and verify their PIN. Returns the row, or null if denied. */
 async function authMember(env, memberId, pin) {
   const member = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(memberId).first();
@@ -36,8 +46,19 @@ export async function handleApi(request, env) {
   if (!keyHash) {
     return err('Server not configured: set the FAMILY_KEY_HASH secret (see README)', 503);
   }
+  // Rate-limit password guessing: after 20 failures from one IP in 10 minutes,
+  // refuse even correct attempts until the window passes.
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const now = Math.floor(Date.now() / 1000);
+  const { cnt } = await env.DB.prepare(
+    'SELECT COUNT(*) AS cnt FROM auth_failures WHERE ip = ? AND ts > ?'
+  ).bind(ip, now - 600).first();
+  if (cnt >= 20) return err('Too many attempts — try again in a few minutes', 429);
+
   const familyKey = request.headers.get('X-Family-Key');
   if (!familyKey || (await sha256Hex(familyKey)) !== keyHash.toLowerCase()) {
+    await env.DB.prepare('INSERT INTO auth_failures (ip, ts) VALUES (?, ?)').bind(ip, now).run();
+    await env.DB.prepare('DELETE FROM auth_failures WHERE ts < ?').bind(now - 3600).run();
     return err('Family password required', 401);
   }
 
@@ -86,7 +107,8 @@ export async function handleApi(request, env) {
     }
 
     if (request.method === 'POST' && path === '/api/checkin') {
-      const body = await request.json();
+      const body = await readBody(request);
+      if (!body) return err('Invalid request body', 400);
       const member = await authMember(env, body.memberId, body.pin);
       if (!member) return err('Wrong PIN', 403);
       const { date } = body;
@@ -100,41 +122,51 @@ export async function handleApi(request, env) {
     }
 
     if (request.method === 'POST' && path === '/api/profile') {
-      const body = await request.json();
+      const body = await readBody(request);
+      if (!body) return err('Invalid request body', 400);
       const member = await authMember(env, body.memberId, body.pin);
       if (!member) return err('Wrong PIN', 403);
-      if (typeof body.foodRule === 'string' && body.foodRule.trim()) {
-        await env.DB.prepare('UPDATE members SET food_rule = ? WHERE id = ?')
-          .bind(body.foodRule.trim(), member.id).run();
-      }
-      if (typeof body.bedtime === 'string' && body.bedtime.trim()) {
-        if (member.role === 'kid') return err('Only a parent can change your bedtime', 403);
-        await env.DB.prepare('UPDATE members SET bedtime = ? WHERE id = ?')
-          .bind(body.bedtime.trim(), member.id).run();
-      }
-      if (typeof body.chores === 'string' && body.chores.trim()) {
-        if (member.role === 'kid') return err('Only a parent can change your chores', 403);
-        await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?')
-          .bind(body.chores.trim(), member.id).run();
-      }
+
+      // Validate everything before writing anything, so a rejected field
+      // can't leave a half-applied update behind.
+      const foodRule = typeof body.foodRule === 'string' ? body.foodRule.trim() : null;
+      const bedtime = typeof body.bedtime === 'string' ? body.bedtime.trim() : null;
+      const chores = typeof body.chores === 'string' ? body.chores.trim() : null;
+      if (bedtime && member.role === 'kid') return err('Only a parent can change your bedtime', 403);
+      if (chores && member.role === 'kid') return err('Only a parent can change your chores', 403);
+      let email;
       if (typeof body.email === 'string') {
-        const email = body.email.trim();
+        email = body.email.trim();
         if (email && !/^\S+@\S+\.\S+$/.test(email)) return err('That email does not look right', 400);
-        await env.DB.prepare('UPDATE members SET email = ? WHERE id = ?')
-          .bind(email || null, member.id).run();
       }
+      let pushValue;
       if ('pushSubscription' in body) {
-        let value = null;
+        pushValue = null;
         if (body.pushSubscription) {
           try {
-            if (!JSON.parse(body.pushSubscription)?.endpoint) throw new Error();
-            value = body.pushSubscription;
+            const endpoint = JSON.parse(body.pushSubscription)?.endpoint;
+            if (!endpoint || !endpoint.startsWith('https://')) throw new Error();
+            pushValue = body.pushSubscription;
           } catch {
             return err('Invalid push subscription', 400);
           }
         }
-        await env.DB.prepare('UPDATE members SET push_subscription = ? WHERE id = ?')
-          .bind(value, member.id).run();
+      }
+
+      if (foodRule) {
+        await env.DB.prepare('UPDATE members SET food_rule = ? WHERE id = ?').bind(foodRule, member.id).run();
+      }
+      if (bedtime) {
+        await env.DB.prepare('UPDATE members SET bedtime = ? WHERE id = ?').bind(bedtime, member.id).run();
+      }
+      if (chores) {
+        await env.DB.prepare('UPDATE members SET chores_rule = ? WHERE id = ?').bind(chores, member.id).run();
+      }
+      if (email !== undefined) {
+        await env.DB.prepare('UPDATE members SET email = ? WHERE id = ?').bind(email || null, member.id).run();
+      }
+      if (pushValue !== undefined) {
+        await env.DB.prepare('UPDATE members SET push_subscription = ? WHERE id = ?').bind(pushValue, member.id).run();
       }
       return json({ ok: true });
     }
@@ -142,7 +174,8 @@ export async function handleApi(request, env) {
     // Admin changes the shared family password from the app; the new hash is
     // stored in settings and overrides the bootstrap FAMILY_KEY_HASH secret.
     if (request.method === 'POST' && path === '/api/admin/familykey') {
-      const body = await request.json();
+      const body = await readBody(request);
+      if (!body) return err('Invalid request body', 400);
       const actor = await authMember(env, body.adminId, body.pin);
       if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
       const newKey = String(body.newKey ?? '');
@@ -155,7 +188,8 @@ export async function handleApi(request, env) {
 
     // Admin corrections: edit any member's day, including beyond the grace window.
     if (request.method === 'POST' && path === '/api/admin/checkin') {
-      const body = await request.json();
+      const body = await readBody(request);
+      if (!body) return err('Invalid request body', 400);
       const actor = await authMember(env, body.adminId, body.pin);
       if (!actor || actor.role !== 'admin') return err('Admin access required', 403);
       const target = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(body.memberId).first();
@@ -205,7 +239,8 @@ export async function handleApi(request, env) {
     }
 
     if (request.method === 'POST' && path === '/api/admin/member') {
-      const body = await request.json();
+      const body = await readBody(request);
+      if (!body) return err('Invalid request body', 400);
       const actor = await authMember(env, body.adminId, body.pin);
       if (!actor || actor.role === 'kid') return err('Admin access required', 403);
       const m = body.member ?? {};

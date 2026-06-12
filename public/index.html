@@ -97,6 +97,7 @@
   }
   .toast.show { opacity: 1; }
   .toast.error { background: var(--red); color: #fff; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .muted { color: var(--muted); font-size: .85rem; }
   .linkish { background: none; color: var(--blue); padding: 4px; }
   .hidden { display: none; }
@@ -116,6 +117,10 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+// All user-entered text (names, rules, emails) must pass through esc() before
+// being placed in HTML — it's family data, but kids prank and the repo is public.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const view = $('#view');
 let me = null;                       // {id, name, role, bedtime, food_rule, today, days}
 let pin = localStorage.getItem('pin') || '';
@@ -151,20 +156,25 @@ async function api(path, opts) {
 function showGate() {
   $('#nav').classList.add('hidden');
   $('#sub').textContent = 'Family members only';
+  // A real <form> with autocomplete hints so password managers (Apple
+  // Passwords etc.) offer to save and autofill the shared password. The
+  // hidden username field gives them an account name to file it under.
   view.innerHTML = `<div class="card"><div class="muted">🔒 Enter the family password</div>
-    <input class="pin-input" id="familyKey" type="password" autocomplete="off" style="letter-spacing:normal;font-size:1.1rem">
-    <button class="primary" id="enter">Enter</button></div>`;
+    <form id="gateForm">
+      <input type="text" name="username" value="family" autocomplete="username" readonly class="visually-hidden" tabindex="-1" aria-hidden="true">
+      <input class="pin-input" id="familyKey" name="password" type="password" autocomplete="current-password" style="letter-spacing:normal;font-size:1.1rem">
+      <button class="primary" type="submit">Enter</button>
+    </form></div>`;
   $('#familyKey').focus();
-  const tryKey = async () => {
+  $('#gateForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
     familyKey = $('#familyKey').value;
     try {
       await api('/api/members');
       localStorage.setItem('familyKey', familyKey);
       showLogin();
     } catch (e) { toast(e.message, true); }
-  };
-  $('#enter').addEventListener('click', tryKey);
-  $('#familyKey').addEventListener('keydown', (e) => e.key === 'Enter' && tryKey());
+  });
 }
 
 function relLabel(dateStr, today) {
@@ -182,7 +192,7 @@ async function showLogin(preselect) {
   const members = await api('/api/members');
   if (preselect == null) {
     view.innerHTML = '<div class="card"><div class="muted">Who are you?</div>' +
-      members.map((m) => `<button class="member-btn" data-id="${m.id}" data-pin="${m.has_pin}">${m.name}</button>`).join('') +
+      members.map((m) => `<button class="member-btn" data-id="${m.id}" data-pin="${m.has_pin}">${esc(m.name)}</button>`).join('') +
       '</div>';
     view.querySelectorAll('.member-btn').forEach((b) =>
       b.addEventListener('click', () => {
@@ -233,7 +243,7 @@ function renderCheckin() {
   // Most recent day first.
   const days = [...me.days].reverse();
   view.innerHTML = `<div class="row" style="margin:2px 4px 0">
-      <span class="muted">Logging for <b>${me.name}</b></span>
+      <span class="muted">Logging for <b>${esc(me.name)}</b></span>
       <button class="linkish" id="switchPerson">👤 Switch person</button>
     </div>` + days.map((d) => {
     const vac = !!d.entry?.vacation;
@@ -251,17 +261,17 @@ function renderCheckin() {
       <div class="q" style="text-align:center;padding:8px 0">🏖️ <b>Vacation day</b> — doesn't count for or against you</div>
       <button class="primary unvacation">Undo vacation</button>
       ` : `
-      <div class="q">🛏️ In bed by <b>${me.bedtime}</b>?<small>your bedtime</small></div>
+      <div class="q">🛏️ In bed by <b>${esc(me.bedtime)}</b>?<small>your bedtime</small></div>
       <div class="yn" data-q="bedtime">
         <button class="yes ${a.bedtime === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.bedtime === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🥦 Stuck to <b>${me.food_rule}</b>?<small>your food goal</small></div>
+      <div class="q">🥦 Stuck to <b>${esc(me.food_rule)}</b>?<small>your food goal</small></div>
       <div class="yn" data-q="food">
         <button class="yes ${a.food === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.food === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🧹 Finished <b>${me.chores_rule}</b>?<small>your chores</small></div>
+      <div class="q">🧹 Finished <b>${esc(me.chores_rule)}</b>?<small>your chores</small></div>
       <div class="yn" data-q="chores">
         <button class="yes ${a.chores === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.chores === false ? 'sel' : ''}">No</button>
@@ -341,10 +351,10 @@ async function renderHistory() {
 
   view.innerHTML = `<div class="card">
     <div class="chips">${members.map((m) =>
-      `<button class="chip ${m.id === Number(histMemberId) ? 'sel' : ''}" data-id="${m.id}">${m.name.split(' ')[0]}</button>`).join('')}</div>
+      `<button class="chip ${m.id === Number(histMemberId) ? 'sel' : ''}" data-id="${m.id}">${esc(m.name.split(' ')[0])}</button>`).join('')}</div>
     <div class="row" style="margin:8px 0 2px">
       <button class="linkish" id="prevMonth">←</button>
-      <b>${h.member.name} — ${monthLabel}</b>
+      <b>${esc(h.member.name)} — ${monthLabel}</b>
       <button class="linkish" id="nextMonth">→</button>
     </div>
     <div class="calgrid">
@@ -402,7 +412,7 @@ function renderDayEditor(h) {
     </div>`;
   $('#dayEditor').innerHTML = `
     <div style="border-top:1px solid var(--card2);margin-top:10px;padding-top:8px">
-      <b>Fixing ${h.member.name} — ${fmtFull(ed.date)}</b>
+      <b>Fixing ${esc(h.member.name)} — ${fmtFull(ed.date)}</b>
       ${yn('bedtime', '🛏️ Bedtime')}${yn('food', '🥦 Food goal')}${yn('chores', '🧹 Chores')}${yn('outside', '🌳 Outside 30+ min')}
       <button class="primary" id="edSave">Save correction</button>
       <div class="yn" style="margin-top:8px">
@@ -443,7 +453,7 @@ function championBanner(board) {
   if (!top || (top.stats.lastMonth.perfect === 0 && score(top) === 0)) return '';
   const winners = ranked
     .filter((m) => m.stats.lastMonth.perfect === top.stats.lastMonth.perfect && score(m) === score(top))
-    .map((m) => m.name.split(' ')[0]).join(' & ');
+    .map((m) => esc(m.name.split(' ')[0])).join(' & ');
   const [y, mo] = board.today.split('-').map(Number);
   const monthName = new Date(y, mo - 2, 1).toLocaleDateString('en-US', { month: 'long' });
   return `<div class="banner">👑 ${monthName} champion: <b>${winners}</b> —
@@ -466,7 +476,7 @@ async function renderBoard() {
     <table>
       <tr><th></th><th>🛏️</th><th>🥦</th><th>🧹</th><th>🌳</th><th>⭐</th></tr>
       ${sorted.map((m, i) => `<tr>
-        <td>${medals[i] ?? ''} ${m.name.split(' ')[0]}<br>
+        <td>${medals[i] ?? ''} ${esc(m.name.split(' ')[0])}<br>
           <span class="streak">🔥 ${m.stats.streaks.perfect.current} day streak (best ${m.stats.streaks.perfect.longest})</span></td>
         <td>${m.stats[period].bedtime}</td>
         <td>${m.stats[period].food}</td>
@@ -486,17 +496,17 @@ function renderProfile() {
   $('#sub').textContent = 'Your settings';
   const isKid = me.role === 'kid';
   view.innerHTML = `<div class="card">
-    <div class="row"><b>${me.name}</b><span class="badge">${me.role}</span></div>
+    <div class="row"><b>${esc(me.name)}</b><span class="badge">${me.role}</span></div>
     <label>🛏️ Your bedtime</label>
-    <input type="text" id="bedtime" value="${me.bedtime}" ${isKid ? 'disabled' : ''}>
+    <input type="text" id="bedtime" value="${esc(me.bedtime)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your bedtime.</div>' : ''}
     <label>🥦 Food you're avoiding (your own goal)</label>
-    <input type="text" id="foodRule" value="${me.food_rule}">
+    <input type="text" id="foodRule" value="${esc(me.food_rule)}">
     <label>🧹 Your chores</label>
-    <input type="text" id="chores" value="${me.chores_rule}" ${isKid ? 'disabled' : ''}>
+    <input type="text" id="chores" value="${esc(me.chores_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your chores.</div>' : ''}
     <label>📧 Email for reminders (optional)</label>
-    <input type="email" id="email" value="${me.email ?? ''}" placeholder="you@example.com">
+    <input type="email" id="email" value="${esc(me.email ?? '')}" placeholder="you@example.com">
     <div class="muted" style="margin-top:4px">Daily nudges and the weekly leaderboard land here. Leave blank for no emails.</div>
     <label>🔔 Push reminders on this phone</label>
     <button id="pushToggle" style="width:100%">${me.push ? 'On — tap to turn off' : 'Off — tap to turn on'}</button>
@@ -508,9 +518,12 @@ function renderProfile() {
     ? `<div class="card"><b>👑 Admin: manage family</b><div id="adminList" class="muted" style="margin-top:8px">Loading…</div></div>
        <div class="card"><b>🔒 Change family password</b>
          <div class="muted" style="margin-top:4px">Everyone's device will ask for the new password on its next visit.</div>
-         <label>New family password (6+ characters)</label>
-         <input type="text" id="newFamilyKey" autocomplete="off">
-         <button class="primary" id="saveFamilyKey">Change password</button>
+         <form id="fkForm">
+           <input type="text" name="username" value="family" autocomplete="username" readonly class="visually-hidden" tabindex="-1" aria-hidden="true">
+           <label>New family password (6+ characters)</label>
+           <input type="password" id="newFamilyKey" autocomplete="new-password">
+           <button class="primary" type="submit">Change password</button>
+         </form>
        </div>`
     : me.role === 'adult'
       ? '<div class="card"><b>🧹 Kids’ chores</b><div id="kidChores" class="muted" style="margin-top:8px">Loading…</div></div>'
@@ -531,7 +544,8 @@ function renderProfile() {
   $('#logout').addEventListener('click', logout);
   $('#pushToggle').addEventListener('click', () => (me.push ? disablePush() : enablePush()));
   if (me.role === 'admin') {
-    $('#saveFamilyKey').addEventListener('click', async () => {
+    $('#fkForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
       const newKey = $('#newFamilyKey').value;
       try {
         await api('/api/admin/familykey', { adminId: me.id, pin, newKey });
@@ -553,19 +567,19 @@ async function renderAdmin() {
   const members = await api('/api/members');
   $('#adminList').innerHTML = members.map((m) => `
     <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
-      <div class="row"><b style="color:var(--text)">${m.name}</b><span class="badge">${m.role}${m.has_pin ? ' · 🔑 PIN set' : ' · no PIN'}</span></div>
-      <label>Name</label><input type="text" class="a-name" value="${m.name}">
+      <div class="row"><b style="color:var(--text)">${esc(m.name)}</b><span class="badge">${m.role}${m.has_pin ? ' · 🔑 PIN set' : ' · no PIN'}</span></div>
+      <label>Name</label><input type="text" class="a-name" value="${esc(m.name)}">
       <label>Role</label>${roleSelect('a-role', m.role)}
-      <label>Bedtime</label><input type="text" class="a-bedtime" value="${m.bedtime}">
-      <label>Chores</label><input type="text" class="a-chores" value="${m.chores_rule}">
-      <label>Email for reminders (blank = none)</label><input type="email" class="a-email" value="${m.email ?? ''}" placeholder="them@example.com">
-      <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••">
+      <label>Bedtime</label><input type="text" class="a-bedtime" value="${esc(m.bedtime)}">
+      <label>Chores</label><input type="text" class="a-chores" value="${esc(m.chores_rule)}">
+      <label>Email for reminders (blank = none)</label><input type="email" class="a-email" value="${esc(m.email ?? '')}" placeholder="them@example.com">
+      <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••" autocomplete="off">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
         <input type="checkbox" class="a-nopin" style="width:auto" ${m.has_pin ? '' : 'checked'}>
-        No PIN — ${m.name.split(' ')[0]} logs in with one tap
+        No PIN — ${esc(m.name.split(' ')[0])} logs in with one tap
       </label>
-      <button class="primary a-save" style="margin-top:8px">Update ${m.name.split(' ')[0]}</button>
-      <button class="danger a-remove">Remove ${m.name.split(' ')[0]}…</button>
+      <button class="primary a-save" style="margin-top:8px">Update ${esc(m.name.split(' ')[0])}</button>
+      <button class="danger a-remove">Remove ${esc(m.name.split(' ')[0])}…</button>
     </div>`).join('') + `
     <div style="border-top:1px solid var(--card2);padding:12px 0">
       <b style="color:var(--text)">➕ Add a member</b>
@@ -672,9 +686,9 @@ async function renderKidChores() {
   const kids = members.filter((m) => m.role === 'kid');
   $('#kidChores').innerHTML = kids.map((m) => `
     <div style="border-top:1px solid var(--card2);padding:10px 0" data-id="${m.id}">
-      <div class="row"><b style="color:var(--text)">${m.name}</b></div>
-      <label>Chores</label><input type="text" class="k-chores" value="${m.chores_rule}">
-      <button class="primary k-save" style="margin-top:8px">Update ${m.name.split(' ')[0]}</button>
+      <div class="row"><b style="color:var(--text)">${esc(m.name)}</b></div>
+      <label>Chores</label><input type="text" class="k-chores" value="${esc(m.chores_rule)}">
+      <button class="primary k-save" style="margin-top:8px">Update ${esc(m.name.split(' ')[0])}</button>
     </div>`).join('');
   $('#kidChores').querySelectorAll('[data-id]').forEach((row) => {
     row.querySelector('.k-save').addEventListener('click', async () => {
