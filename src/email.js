@@ -122,7 +122,7 @@ export async function sendWeeklySummary(env) {
   const rows = sorted.map((m, i) => `
     <tr>
       <td style="padding:6px 12px">${medals[i] ?? ''} <b>${esc(m.name)}</b></td>
-      <td style="padding:6px 12px;text-align:center">${m.stats.month.bedtime}</td>
+      <td style="padding:6px 12px;text-align:center">${Math.round(m.stats.month.bedtime * 10) / 10}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.food}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.chores}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.outside}</td>

@@ -121,6 +121,8 @@ const $ = (s) => document.querySelector(s);
 // being placed in HTML — it's family data, but kids prank and the repo is public.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Round a tally for display (bedtime is fractional points; one decimal is plenty).
+const round1 = (n) => Math.round(n * 10) / 10;
 const view = $('#view');
 let me = null;                       // {id, name, role, bedtime, food_rule, today, days}
 let pin = localStorage.getItem('pin') || '';
@@ -264,8 +266,9 @@ function renderCheckin() {
     </div>` + (days.length === 0 ? emptyState : '') + days.map((d) => {
     const vac = !!d.entry?.vacation;
     const a = answers[d.date] ?? (d.entry && !vac
-      ? { bedtime: !!d.entry.bedtime_yes, food: !!d.entry.food_yes, chores: !!d.entry.chores_yes, outside: !!d.entry.outside_yes }
-      : { bedtime: null, food: null, chores: null, outside: null });
+      ? { bedtime: !!d.entry.bedtime_yes, bedtimeMinutesLate: d.entry.bedtime_minutes_late ?? '',
+          food: !!d.entry.food_yes, chores: !!d.entry.chores_yes, outside: !!d.entry.outside_yes }
+      : { bedtime: null, bedtimeMinutesLate: '', food: null, chores: null, outside: null });
     answers[d.date] = a;
     return `<div class="card" data-date="${d.date}">
       <div class="row">
@@ -276,22 +279,28 @@ function renderCheckin() {
       ${vac ? `
       <div class="q" style="text-align:center;padding:8px 0">✈️ <b>Away day</b> — doesn't count for or against you (set by a parent)</div>
       ` : `
-      <div class="q">🛏️ In bed by <b>${esc(me.bedtime)}</b>?<small>your bedtime</small></div>
+      <div class="q">🛏️ Met my bedtime goals? <small>(${esc(me.bedtime)})</small></div>
       <div class="yn" data-q="bedtime">
         <button class="yes ${a.bedtime === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.bedtime === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🥩 Stuck to <b>${esc(me.food_rule)}</b>?<small>your food goal</small></div>
+      ${a.bedtime === false ? `
+      <input type="number" class="mins-late" min="0" step="5" inputmode="numeric"
+        placeholder="minutes late (optional, multiples of 5)" value="${a.bedtimeMinutesLate}"
+        style="margin-top:8px">
+      <div class="muted" style="margin-top:4px">Every 5 min late costs ⅙ of a point; 30+ min loses the full point.</div>
+      ` : ''}
+      <div class="q">🥩 Met my food goals? <small>(${esc(me.food_rule)})</small></div>
       <div class="yn" data-q="food">
         <button class="yes ${a.food === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.food === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🧹 Finished <b>${esc(me.chores_rule)}</b>?<small>your chores</small></div>
+      <div class="q">🧹 Met my healthy habits, phone habits, & chores goals? <small>(${esc(me.chores_rule)})</small></div>
       <div class="yn" data-q="chores">
         <button class="yes ${a.chores === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.chores === false ? 'sel' : ''}">No</button>
       </div>
-      <div class="q">🌳 <b>${esc(me.outside_rule.replace(/\?+$/, ''))}</b>?<small>your outside & exercise goal</small></div>
+      <div class="q">🌳 Met my outside & exercise goals? <small>(${esc(me.outside_rule.replace(/\?+$/, ''))})</small></div>
       <div class="yn" data-q="outside">
         <button class="yes ${a.outside === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.outside === false ? 'sel' : ''}">No</button>
@@ -315,15 +324,31 @@ function renderCheckin() {
     const date = card.dataset.date;
     card.querySelectorAll('.yn[data-q]').forEach((yn) => {
       const q = yn.dataset.q;
-      yn.querySelector('.yes').addEventListener('click', () => { answers[date][q] = true; renderCheckin(); });
+      yn.querySelector('.yes').addEventListener('click', () => {
+        answers[date][q] = true;
+        if (q === 'bedtime') answers[date].bedtimeMinutesLate = ''; // on time → no lateness
+        renderCheckin();
+      });
       yn.querySelector('.no').addEventListener('click', () => { answers[date][q] = false; renderCheckin(); });
+    });
+    // Update minutes-late without re-rendering (keeps the field focused while typing).
+    card.querySelector('.mins-late')?.addEventListener('input', (e) => {
+      answers[date].bedtimeMinutesLate = e.target.value;
     });
     card.querySelector('.save')?.addEventListener('click', () => {
       const a = answers[date];
       if ([a.bedtime, a.food, a.chores, a.outside].includes(null)) {
         return toast('Answer all four questions first', true);
       }
-      send(date, { bedtimeYes: a.bedtime, foodYes: a.food, choresYes: a.chores, outsideYes: a.outside }, 'Saved! 🎉');
+      const mins = a.bedtime === false && String(a.bedtimeMinutesLate).trim() !== ''
+        ? Number(a.bedtimeMinutesLate) : null;
+      if (mins !== null && (!Number.isInteger(mins) || mins < 0 || mins % 5 !== 0)) {
+        return toast('Minutes late must be a multiple of 5', true);
+      }
+      send(date, {
+        bedtimeYes: a.bedtime, bedtimeMinutesLate: mins,
+        foodYes: a.food, choresYes: a.chores, outsideYes: a.outside,
+      }, 'Saved! 🎉');
     });
     card.querySelector('.clearday')?.addEventListener('click', () => send(date, { clear: true }, 'Answers cleared'));
   });
@@ -399,7 +424,8 @@ async function renderHistory() {
       if (!day) return;
       if (day.preStart) return toast(`That's before ${h.member.name} joined`, true);
       if (day.date >= h.today) return toast("That day isn't over yet", true);
-      histEdit = { date: day.date, ...(day.entry ?? { bedtime: null, food: null, chores: null, outside: null }) };
+      histEdit = { date: day.date, bedtimeMinutesLate: '', ...(day.entry ?? { bedtime: null, food: null, chores: null, outside: null }) };
+      if (histEdit.bedtimeMinutesLate == null) histEdit.bedtimeMinutesLate = '';
       view.querySelectorAll('.cal.editing').forEach((c) => c.classList.remove('editing'));
       cell.classList.add('editing');
       renderDayEditor(h);
@@ -423,7 +449,10 @@ function renderDayEditor(h) {
   $('#dayEditor').innerHTML = `
     <div style="border-top:1px solid var(--card2);margin-top:10px;padding-top:8px">
       <b>Fixing ${esc(h.member.name)} — ${fmtFull(ed.date)}</b>
-      ${yn('bedtime', '🛏️ Bedtime')}${yn('food', '🥩 Food goal')}${yn('chores', '🧹 Chores')}${yn('outside', '🌳 Outside & exercise')}
+      ${yn('bedtime', '🛏️ Bedtime')}
+      ${ed.bedtime === false ? `<input type="number" id="edMins" min="0" step="5" inputmode="numeric"
+        placeholder="minutes late (optional, multiples of 5)" value="${ed.bedtimeMinutesLate}" style="margin-top:8px">` : ''}
+      ${yn('food', '🥩 Food goal')}${yn('chores', '🧹 Chores')}${yn('outside', '🌳 Outside & exercise')}
       <button class="primary" id="edSave">Save correction</button>
       <div class="yn" style="margin-top:8px">
         <button id="edVacation">✈️ Away day</button>
@@ -440,14 +469,24 @@ function renderDayEditor(h) {
   };
   $('#dayEditor').querySelectorAll('.yn[data-q]').forEach((row) => {
     const q = row.dataset.q;
-    row.querySelector('.yes').addEventListener('click', () => { ed[q] = true; renderDayEditor(h); });
+    row.querySelector('.yes').addEventListener('click', () => {
+      ed[q] = true;
+      if (q === 'bedtime') ed.bedtimeMinutesLate = '';
+      renderDayEditor(h);
+    });
     row.querySelector('.no').addEventListener('click', () => { ed[q] = false; renderDayEditor(h); });
   });
+  $('#edMins')?.addEventListener('input', (e) => { ed.bedtimeMinutesLate = e.target.value; });
   $('#edSave').addEventListener('click', () => {
     if ([ed.bedtime, ed.food, ed.chores, ed.outside].includes(null)) {
       return toast('Answer all four questions first', true);
     }
-    sendFix({ bedtimeYes: ed.bedtime, foodYes: ed.food, choresYes: ed.chores, outsideYes: ed.outside }, 'Corrected! 🎉');
+    const mins = ed.bedtime === false && String(ed.bedtimeMinutesLate).trim() !== ''
+      ? Number(ed.bedtimeMinutesLate) : null;
+    if (mins !== null && (!Number.isInteger(mins) || mins < 0 || mins % 5 !== 0)) {
+      return toast('Minutes late must be a multiple of 5', true);
+    }
+    sendFix({ bedtimeYes: ed.bedtime, bedtimeMinutesLate: mins, foodYes: ed.food, choresYes: ed.chores, outsideYes: ed.outside }, 'Corrected! 🎉');
   });
   $('#edVacation').addEventListener('click', () => sendFix({ vacation: true }, '✈️ Marked as an away day'));
   $('#edClear').addEventListener('click', () => sendFix({ clear: true }, 'Day cleared'));
@@ -492,6 +531,14 @@ function awardsList(aw) {
     : `<p class="muted">No check-ins were logged in ${monthName(aw.month)}.</p>`;
 }
 
+// Compact per-category streak line: 🔥 current(best) for each goal + perfect.
+function streakRow(s) {
+  const parts = [
+    ['🛏️', s.bedtime], ['🥩', s.food], ['🧹', s.chores], ['🌳', s.outside], ['⭐', s.perfect],
+  ];
+  return '🔥 ' + parts.map(([icon, st]) => `${icon}${st.current}(${st.longest})`).join(' ');
+}
+
 async function renderBoard() {
   $('#sub').textContent = 'Who is winning?';
   const board = await api('/api/leaderboard');
@@ -517,15 +564,16 @@ async function renderBoard() {
       <tr><th></th><th>🛏️</th><th>🥩</th><th>🧹</th><th>🌳</th><th>⭐</th></tr>
       ${sorted.map((m, i) => `<tr>
         <td>${medals[i] ?? ''} ${esc(m.name.split(' ')[0])}<br>
-          <span class="streak">🔥 ${m.stats.streaks.perfect.current} day streak (best ${m.stats.streaks.perfect.longest})</span></td>
-        <td>${m.stats[period].bedtime}</td>
+          <span class="streak">${streakRow(m.stats.streaks)}</span></td>
+        <td>${round1(m.stats[period].bedtime)}</td>
         <td>${m.stats[period].food}</td>
         <td>${m.stats[period].chores}</td>
         <td>${m.stats[period].outside}</td>
         <td><b>${m.stats[period].perfect}</b></td>
       </tr>`).join('')}
     </table>
-    <p class="muted" style="margin-top:10px">🛏️ bedtime · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four). Streaks count perfect days.</p>
+    <p class="muted" style="margin-top:10px">🛏️ bedtime points · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four).</p>
+    <p class="muted" style="margin-top:6px">🔥 current streak (best) per goal · ⭐ = perfect-day streak.</p>
   </div>
   <div class="card">
     <b>👑 ${monthName(lastMonth)} awards</b>
@@ -550,15 +598,15 @@ function renderProfile() {
   const isKid = me.role === 'kid';
   view.innerHTML = `<div class="card">
     <div class="row"><b>${esc(me.name)}</b><span class="badge">${me.role}</span></div>
-    <label>🛏️ Your bedtime</label>
+    <label>🛏️ Bedtime Goals</label>
     <input type="text" id="bedtime" maxlength="100" value="${esc(me.bedtime)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your bedtime.</div>' : ''}
-    <label>🥩 Food you're avoiding (your own goal)</label>
+    <label>🥩 Food Goals</label>
     <input type="text" id="foodRule" maxlength="500" value="${esc(me.food_rule)}">
-    <label>🧹 Your chores</label>
+    <label>🧹 Chores/Habits Goals</label>
     <input type="text" id="chores" maxlength="500" value="${esc(me.chores_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change your chores.</div>' : ''}
-    <label>🌳 Your outside &amp; exercise question</label>
+    <label>🌳 Outside & Exercise Goals</label>
     <input type="text" id="outside" maxlength="500" value="${esc(me.outside_rule)}" ${isKid ? 'disabled' : ''}>
     ${isKid ? '<div class="muted" style="margin-top:4px">Only a parent can change this.</div>'
             : '<div class="muted" style="margin-top:4px">Shown as your daily question, e.g. "Walk Merlin" or "Met my exercise goal".</div>'}
@@ -631,10 +679,10 @@ async function renderAdmin() {
       <div class="row"><b style="color:var(--text)">${esc(m.name)}</b><span class="badge">${m.role}${m.has_pin ? ' · 🔑 PIN set' : ' · no PIN'}</span></div>
       <label>Name</label><input type="text" class="a-name" maxlength="80" value="${esc(m.name)}">
       <label>Role</label>${roleSelect('a-role', m.role)}
-      <label>Bedtime</label><input type="text" class="a-bedtime" maxlength="100" value="${esc(m.bedtime)}">
-      <label>Food goal</label><input type="text" class="a-food" maxlength="500" value="${esc(m.food_rule)}">
-      <label>Chores</label><input type="text" class="a-chores" maxlength="500" value="${esc(m.chores_rule)}">
-      <label>Outside &amp; exercise question</label><input type="text" class="a-outside" maxlength="500" value="${esc(m.outside_rule)}">
+      <label>Bedtime Goals</label><input type="text" class="a-bedtime" maxlength="100" value="${esc(m.bedtime)}">
+      <label>Food Goals</label><input type="text" class="a-food" maxlength="500" value="${esc(m.food_rule)}">
+      <label>Chores/Habits Goals</label><input type="text" class="a-chores" maxlength="500" value="${esc(m.chores_rule)}">
+      <label>Outside &amp; Exercise Goals</label><input type="text" class="a-outside" maxlength="500" value="${esc(m.outside_rule)}">
       <label>Email for reminders (blank = none)</label><input type="email" class="a-email" value="${esc(m.email ?? '')}" placeholder="them@example.com">
       <label>New PIN (blank = keep current)</label><input type="text" class="a-pin" inputmode="numeric" placeholder="••••" autocomplete="off">
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
@@ -648,10 +696,10 @@ async function renderAdmin() {
       <b style="color:var(--text)">➕ Add a member</b>
       <label>Name</label><input type="text" id="add-name" placeholder="Name">
       <label>Role</label>${roleSelect('add-role', 'kid')}
-      <label>Bedtime</label><input type="text" id="add-bedtime" maxlength="100" placeholder="9:00 PM">
-      <label>Food goal</label><input type="text" id="add-food" maxlength="500" placeholder="no junk food">
-      <label>Chores</label><input type="text" id="add-chores" maxlength="500" placeholder="daily chores">
-      <label>Outside &amp; exercise question</label><input type="text" id="add-outside" maxlength="500" placeholder="Went outside for 30+ minutes">
+      <label>Bedtime Goals</label><input type="text" id="add-bedtime" maxlength="100" placeholder="9:00 PM">
+      <label>Food Goals</label><input type="text" id="add-food" maxlength="500" placeholder="no junk food">
+      <label>Chores/Habits Goals</label><input type="text" id="add-chores" maxlength="500" placeholder="daily chores">
+      <label>Outside &amp; Exercise Goals</label><input type="text" id="add-outside" maxlength="500" placeholder="Went outside for 30+ minutes">
       <label>PIN (optional)</label><input type="text" id="add-pin" inputmode="numeric" placeholder="leave blank for no PIN">
       <button class="primary" id="a-add">Add member</button>
     </div>`;

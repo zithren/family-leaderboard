@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS checkins (
   member_id INTEGER NOT NULL REFERENCES members(id),
   date TEXT NOT NULL,            -- YYYY-MM-DD in the family timezone
   bedtime_yes INTEGER NOT NULL CHECK (bedtime_yes IN (0, 1)),
+  -- Minutes past bedtime when bedtime_yes = 0 (multiple of 5, optional). Used for
+  -- fractional bedtime credit: late N min scores max(0, 1 - N/30). NULL = full point lost.
+  bedtime_minutes_late INTEGER,
   food_yes INTEGER NOT NULL CHECK (food_yes IN (0, 1)),
   chores_yes INTEGER NOT NULL CHECK (chores_yes IN (0, 1)),
   outside_yes INTEGER NOT NULL CHECK (outside_yes IN (0, 1)),

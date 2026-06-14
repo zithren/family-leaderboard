@@ -131,7 +131,7 @@ export async function handleApi(request, env) {
       if (!member) return err('Wrong PIN', 403);
       const dates = loggableDates(today, graceDays);
       const { results: entries } = await env.DB.prepare(
-        'SELECT date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date >= ?'
+        'SELECT date, bedtime_yes, bedtime_minutes_late, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date >= ?'
       ).bind(member.id, dates[0]).all();
       const byDate = Object.fromEntries(entries.map((e) => [e.date, e]));
       // Clamp: SQLite's date('now') is UTC, so a freshly seeded start_date can
@@ -268,7 +268,7 @@ export async function handleApi(request, env) {
       const month = url.searchParams.get('month') ?? today.slice(0, 7);
       if (!/^\d{4}-\d{2}$/.test(month)) return err('Invalid month', 400);
       const { results: entries } = await env.DB.prepare(
-        "SELECT date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date LIKE ?"
+        "SELECT date, bedtime_yes, bedtime_minutes_late, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE member_id = ? AND date LIKE ?"
       ).bind(member.id, month + '-%').all();
       const byDate = new Map(entries.map((e) => [e.date, e]));
       const [y, m] = month.split('-').map(Number);
@@ -289,7 +289,8 @@ export async function handleApi(request, env) {
           vacation: !!entry?.vacation,
           logged: !!entry,
           entry: entry && !entry.vacation
-            ? { bedtime: !!entry.bedtime_yes, food: !!entry.food_yes, chores: !!entry.chores_yes, outside: !!entry.outside_yes }
+            ? { bedtime: !!entry.bedtime_yes, bedtimeMinutesLate: entry.bedtime_minutes_late ?? null,
+                food: !!entry.food_yes, chores: !!entry.chores_yes, outside: !!entry.outside_yes }
             : null,
           statuses,
         });
@@ -400,15 +401,26 @@ async function saveCheckin(env, memberId, date, body) {
   if (!vacation && [body.bedtimeYes, body.foodYes, body.choresYes, body.outsideYes].some((v) => typeof v !== 'boolean')) {
     return err('bedtimeYes, foodYes, choresYes and outsideYes must be true or false', 400);
   }
+  // Minutes late only applies when bedtime is "no"; must be a non-negative
+  // multiple of 5 if given. Stored NULL otherwise (full point or N/A).
+  let minutesLate = null;
+  if (!vacation && body.bedtimeYes === false && body.bedtimeMinutesLate != null) {
+    const n = Number(body.bedtimeMinutesLate);
+    if (!Number.isInteger(n) || n < 0 || n % 5 !== 0) {
+      return err('Minutes late must be a whole number of minutes in multiples of 5', 400);
+    }
+    minutesLate = n;
+  }
   await env.DB.prepare(
-    `INSERT INTO checkins (member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO checkins (member_id, date, bedtime_yes, bedtime_minutes_late, food_yes, chores_yes, outside_yes, vacation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (member_id, date) DO UPDATE SET
-       bedtime_yes = excluded.bedtime_yes, food_yes = excluded.food_yes,
-       chores_yes = excluded.chores_yes, outside_yes = excluded.outside_yes,
-       vacation = excluded.vacation, logged_at = datetime('now')`
+       bedtime_yes = excluded.bedtime_yes, bedtime_minutes_late = excluded.bedtime_minutes_late,
+       food_yes = excluded.food_yes, chores_yes = excluded.chores_yes,
+       outside_yes = excluded.outside_yes, vacation = excluded.vacation, logged_at = datetime('now')`
   ).bind(
     memberId, date,
     !vacation && body.bedtimeYes ? 1 : 0,
+    minutesLate,
     !vacation && body.foodYes ? 1 : 0,
     !vacation && body.choresYes ? 1 : 0,
     !vacation && body.outsideYes ? 1 : 0,
@@ -418,19 +430,26 @@ async function saveCheckin(env, memberId, date, body) {
 }
 
 const AWARD_CATEGORIES = [
-  { key: 'bedtime', label: '🛏️ Bedtime champion', unit: 'days' },
+  { key: 'bedtime', label: '🛏️ Bedtime champion', unit: 'points' },
   { key: 'food', label: '🥩 Food goal champion', unit: 'days' },
   { key: 'chores', label: '🧹 Chores champion', unit: 'days' },
   { key: 'outside', label: '🌳 Outside & exercise champion', unit: 'days' },
   { key: 'perfect', label: '⭐ Star status (most perfect days)', unit: 'days' },
-  { key: 'longestRun', label: '🔥 Longest streak of the month', unit: 'days in a row' },
+  { key: 'longestRun', label: '🔥 Longest perfect-day streak', unit: 'days in a row' },
+  { key: 'streakBedtime', label: '🔥🛏️ Longest bedtime streak', unit: 'days in a row' },
+  { key: 'streakFood', label: '🔥🥩 Longest food streak', unit: 'days in a row' },
+  { key: 'streakChores', label: '🔥🧹 Longest chores streak', unit: 'days in a row' },
+  { key: 'streakOutside', label: '🔥🌳 Longest outside streak', unit: 'days in a row' },
 ];
+
+/** Round a tally for display (bedtime is fractional; one decimal is plenty). */
+const round1 = (n) => Math.round(n * 10) / 10;
 
 /** Compute each category's winner(s) for one month. */
 export async function monthlyAwards(env, month, today, graceDays) {
   const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
   const { results: entries } = await env.DB.prepare(
-    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE date LIKE ?'
+    'SELECT member_id, date, bedtime_yes, bedtime_minutes_late, food_yes, chores_yes, outside_yes, vacation FROM checkins WHERE date LIKE ?'
   ).bind(month + '-%').all();
   const byMember = new Map();
   for (const e of entries) {
@@ -446,8 +465,9 @@ export async function monthlyAwards(env, month, today, graceDays) {
     categories: AWARD_CATEGORIES.map(({ key, label, unit }) => {
       const best = Math.max(0, ...totals.map((t) => t.totals[key]));
       return {
-        key, label, unit, best,
-        winners: best > 0 ? totals.filter((t) => t.totals[key] === best).map((t) => t.name) : [],
+        key, label, unit, best: round1(best),
+        // small epsilon so float bedtime points tie cleanly
+        winners: best > 0 ? totals.filter((t) => Math.abs(t.totals[key] - best) < 1e-9).map((t) => t.name) : [],
       };
     }),
   };
@@ -462,7 +482,7 @@ async function adminCount(env) {
 export async function leaderboard(env, today, graceDays) {
   const { results: members } = await env.DB.prepare('SELECT * FROM members ORDER BY id').all();
   const { results: entries } = await env.DB.prepare(
-    'SELECT member_id, date, bedtime_yes, food_yes, chores_yes, outside_yes, vacation FROM checkins'
+    'SELECT member_id, date, bedtime_yes, bedtime_minutes_late, food_yes, chores_yes, outside_yes, vacation FROM checkins'
   ).all();
   const byMember = new Map();
   for (const e of entries) {

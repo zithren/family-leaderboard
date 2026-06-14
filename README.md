@@ -16,7 +16,8 @@ for a family.
 - 🎯 **Personal goals** — everyone has their own bedtime, food rule, chore list, and a fully custom outside/exercise question ("Walk the dog", "Met my exercise goal", …)
 - 👨‍👩‍👧‍👦 **Roles** — the admin manages everyone (members, roles, PINs, all goals, the family password); adults manage their own goals; kids own only their food goal
 - ⏳ **Grace window** — a day becomes loggable once it's over (you log *yesterday*), and stays editable for 3 days; after that it locks in as a "no"
-- 🔥 **Streaks** — current and longest streaks per goal, plus "perfect days" ⭐ (all four goals met)
+- 🔥 **Streaks** — current and longest streaks for every goal *and* for "perfect days" ⭐ (all four goals met), shown per person on the board
+- ⏱️ **Fractional bedtime** — being a little late costs only part of a point (⅙ per 5 minutes), so there's always something to play for
 - 👑 **Monthly awards** — the board shows last month's winners per category (each question, most perfect days, longest streak) plus a browsable award history; a champion banner and email land on the 1st
 - ✈️ **Away days** — the admin can mark a day as not counting (travel, sleepovers); it neither breaks streaks nor adds to tallies
 - 📅 **History calendar** — month-at-a-glance per person: perfect, partial, missed, away, and still-loggable days; the admin taps any past day to correct it, even beyond the grace window
@@ -104,11 +105,17 @@ Run the logic tests with `npm test`.
 
 ## How scoring works
 
-- A day counts toward the tally only when the answer was **yes**.
+- Food, chores, and outside count toward the tally only when the answer was **yes**.
+- **Bedtime is scored fractionally**: on time = 1 point; if late, you may enter the minutes
+  (multiples of 5) and lose ⅙ of a point per 5 minutes, so 30+ minutes (or no entry) = 0.
+  This only affects the bedtime points total and the bedtime award — any lateness still
+  breaks the bedtime streak and disqualifies a "perfect day".
 - Today is never loggable — you don't know the answers until the day is over.
 - Unanswered days within the 3-day grace window are *pending* — they don't break streaks yet.
 - Unanswered days older than the grace window count as **no** (honor system, but no hoarding!).
-- "Perfect days" ⭐ = all four questions answered yes on the same day. Streaks shown on the board count perfect days.
+- "Perfect days" ⭐ = all four goals fully met on the same day.
+- Streaks (current + longest) are tracked per goal *and* for perfect days; monthly awards
+  crown the top tally in each goal plus the longest streak in each goal.
 - Away days (admin-set) count for nothing and against nothing — streaks carry across them.
 - Days before a member's `start_date` are ignored, so late joiners aren't penalized. New members start "yesterday", so there's always a card to log on day one.
 

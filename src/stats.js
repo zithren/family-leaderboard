@@ -30,15 +30,30 @@ export function loggableDates(today, graceDays) {
 
 /**
  * One member's totals within a single month (YYYY-MM), for awards:
- * yes-count per question, perfect-day count, and the longest run of
- * consecutive perfect days inside that month (pending/skip days bridge).
+ * per-question tallies (bedtime is fractional points; others are yes-counts),
+ * perfect-day count, and the longest run of consecutive full-credit days inside
+ * that month for each category and for perfect days (pending/skip days bridge).
  */
 export function monthTotals(member, entries, month, today, graceDays) {
   const byDate = new Map(entries.map((e) => [e.date, e]));
   const [y, m] = month.split('-').map(Number);
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const totals = { bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0, longestRun: 0 };
-  let run = 0;
+  const totals = {
+    bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0,
+    // longest consecutive full-credit run this month, per category + perfect
+    longestRun: 0, // perfect run (kept for backward compatibility)
+    streakBedtime: 0, streakFood: 0, streakChores: 0, streakOutside: 0,
+  };
+  const run = { bedtime: 0, food: 0, chores: 0, outside: 0, perfect: 0 };
+  const bumpRun = (key, status, longestKey) => {
+    if (status === 'yes') {
+      run[key]++;
+      if (run[key] > totals[longestKey]) totals[longestKey] = run[key];
+    } else if (status === 'no') {
+      run[key] = 0;
+    }
+    // pending/skip: the run carries over.
+  };
   for (let i = 1; i <= lastDay; i++) {
     const d = `${month}-${String(i).padStart(2, '0')}`;
     if (d < member.start_date || d > today) continue;
@@ -46,18 +61,18 @@ export function monthTotals(member, entries, month, today, graceDays) {
     const statuses = Object.entries(QUESTION_KEYS).map(
       ([name, key]) => [name, dayStatus(entry, d, today, graceDays, key)]
     );
+    // Bedtime tally is fractional; the others are yes-counts.
+    const score = bedtimeScore(entry, d, today, graceDays);
+    if (score !== null) totals.bedtime += score;
     for (const [name, status] of statuses) {
-      if (status === 'yes') totals[name]++;
+      if (name !== 'bedtime' && status === 'yes') totals[name]++;
     }
+    const longestKeys = { bedtime: 'streakBedtime', food: 'streakFood', chores: 'streakChores', outside: 'streakOutside' };
+    for (const [name, status] of statuses) bumpRun(name, status, longestKeys[name]);
+
     const perfect = perfectStatus(statuses.map(([, s]) => s));
-    if (perfect === 'yes') {
-      totals.perfect++;
-      run++;
-      if (run > totals.longestRun) totals.longestRun = run;
-    } else if (perfect === 'no') {
-      run = 0;
-    }
-    // pending/skip: the run carries over.
+    if (perfect === 'yes') totals.perfect++;
+    bumpRun('perfect', perfect, 'longestRun');
   }
   return totals;
 }
@@ -103,6 +118,23 @@ function perfectStatus(statuses) {
   return 'pending';
 }
 
+/**
+ * Fractional bedtime points for one day (tallies & awards only — streaks and
+ * perfect days still use the binary dayStatus).
+ *   on time          → 1
+ *   late N minutes    → max(0, 1 − N/30)   (N is a multiple of 5: 5min=5/6, 30min+=0)
+ *   late, no minutes  → 0
+ * Returns null for days that don't count (vacation, pending, future).
+ */
+export function bedtimeScore(entry, date, today, graceDays) {
+  const status = dayStatus(entry, date, today, graceDays, 'bedtime_yes');
+  if (status === 'yes') return 1;
+  if (status !== 'no') return null; // skip / pending / future
+  const minutes = entry?.bedtime_minutes_late;
+  if (typeof minutes !== 'number' || minutes <= 0) return 0;
+  return Math.max(0, 1 - minutes / 30);
+}
+
 export function memberStats(member, entries, today, graceDays) {
   const byDate = new Map(entries.map((e) => [e.date, e]));
   const monthPrefix = today.slice(0, 7);
@@ -135,14 +167,26 @@ export function memberStats(member, entries, today, graceDays) {
 
     if (!entry && d < today && statuses[0][1] === 'pending') pendingDates.push(d);
 
+    // Bedtime tally is fractional points (added on yes *and* late days); all
+    // other tallies are yes-counts. Streaks stay binary for every category.
+    const score = bedtimeScore(entry, d, today, graceDays);
+    if (score !== null) {
+      totals.allTime.bedtime += score;
+      if (d.startsWith(yearPrefix)) totals.year.bedtime += score;
+      if (d.startsWith(monthPrefix)) totals.month.bedtime += score;
+      if (d.startsWith(lastMonth)) totals.lastMonth.bedtime += score;
+    }
+
     for (const [key, status] of [...statuses, ['perfect', perfect]]) {
       if (status === 'yes') {
         run[key]++;
         if (run[key] > streaks[key].longest) streaks[key].longest = run[key];
-        totals.allTime[key]++;
-        if (d.startsWith(yearPrefix)) totals.year[key]++;
-        if (d.startsWith(monthPrefix)) totals.month[key]++;
-        if (d.startsWith(lastMonth)) totals.lastMonth[key]++;
+        if (key !== 'bedtime') {
+          totals.allTime[key]++;
+          if (d.startsWith(yearPrefix)) totals.year[key]++;
+          if (d.startsWith(monthPrefix)) totals.month[key]++;
+          if (d.startsWith(lastMonth)) totals.lastMonth[key]++;
+        }
       } else if (status === 'no') {
         run[key] = 0;
       }
