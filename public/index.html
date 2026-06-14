@@ -536,7 +536,8 @@ function streakRow(s) {
   const parts = [
     ['🛏️', s.bedtime], ['🥩', s.food], ['🧹', s.chores], ['🌳', s.outside], ['⭐', s.perfect],
   ];
-  return '🔥 ' + parts.map(([icon, st]) => `${icon}${st.current}(${st.longest})`).join(' ');
+  return '🔥 ' + parts.map(([icon, st]) => `${icon}${st.current}(${st.longest})`).join(' ')
+    + ' <span class="muted" style="font-weight:400">current streak (best streak ever)</span>';
 }
 
 async function renderBoard() {
