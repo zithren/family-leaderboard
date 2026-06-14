@@ -536,8 +536,7 @@ function streakRow(s) {
   const parts = [
     ['🛏️', s.bedtime], ['🥩', s.food], ['🧹', s.chores], ['🌳', s.outside], ['⭐', s.perfect],
   ];
-  return '🔥 ' + parts.map(([icon, st]) => `${icon}${st.current}(${st.longest})`).join(' ')
-    + ' <span class="muted" style="font-weight:400">current streak (best streak ever)</span>';
+  return '🔥 ' + parts.map(([icon, st]) => `${icon}${st.current}(${st.longest})`).join(' ');
 }
 
 async function renderBoard() {
@@ -574,7 +573,7 @@ async function renderBoard() {
       </tr>`).join('')}
     </table>
     <p class="muted" style="margin-top:10px">🛏️ bedtime points · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four).</p>
-    <p class="muted" style="margin-top:6px">🔥 current streak (best) per goal · ⭐ = perfect-day streak.</p>
+    <p class="muted" style="margin-top:6px">🔥 streaks per goal, e.g. 5(16) = current streak (best streak ever) · ⭐ = perfect-day streak.</p>
   </div>
   <div class="card">
     <b>👑 ${monthName(lastMonth)} awards</b>
