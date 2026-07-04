@@ -226,6 +226,7 @@ async function login(id, pinValue, { silent = false } = {}) {
     localStorage.setItem('pin', pinValue);
     histMemberId = null; histMonth = null; histEdit = null;
     resetAnswers();
+    restoreDraft(id);
     $('#nav').classList.remove('hidden');
     setTab('checkin');
     return true;
@@ -246,9 +247,22 @@ function logout() {
 /* ---------- Check-in ---------- */
 // date -> selected answers. Per person: must be wiped when switching users,
 // or one member's unsaved selections bleed into the next member's cards.
+// Partial selections are also mirrored to localStorage (per member), so a
+// page reload — e.g. iOS reloading a backgrounded home-screen app — can't
+// lose taps that haven't been autosaved yet.
 const answers = {};
+const saveTimers = {}; // date -> pending autosave timer
 function resetAnswers() {
   for (const k of Object.keys(answers)) delete answers[k];
+  for (const k of Object.keys(saveTimers)) { clearTimeout(saveTimers[k]); delete saveTimers[k]; }
+}
+function persistDraft() {
+  if (me) localStorage.setItem('draft:' + me.id, JSON.stringify(answers));
+}
+function restoreDraft(id) {
+  try {
+    Object.assign(answers, JSON.parse(localStorage.getItem('draft:' + id)) ?? {});
+  } catch { /* corrupt draft — ignore */ }
 }
 
 function renderCheckin() {
@@ -305,7 +319,9 @@ function renderCheckin() {
         <button class="yes ${a.outside === true ? 'sel' : ''}">Yes 🎉</button>
         <button class="no ${a.outside === false ? 'sel' : ''}">No</button>
       </div>
-      <button class="primary save">Save ${relLabel(d.date, me.today).toLowerCase()}</button>
+      ${[a.bedtime, a.food, a.chores, a.outside].includes(null)
+        ? '<div class="muted" style="margin-top:10px">Answers save automatically once all four are chosen.</div>'
+        : ''}
       ${d.entry ? '<div class="yn" style="margin-top:8px"><button class="clearday">Clear answers</button></div>' : ''}`}
     </div>`;
   }).join('');
@@ -316,30 +332,18 @@ function renderCheckin() {
       await api('/api/checkin', { memberId: me.id, pin, date, ...payload });
       me = await api(`/api/me?memberId=${me.id}`);
       delete answers[date];
+      persistDraft(); // saved to the server — drop the local draft for this day
       toast(msg);
-      renderCheckin();
+      if (tab === 'checkin') renderCheckin();
     } catch (e) { toast(e.message, true); }
   };
-  view.querySelectorAll('.card').forEach((card) => {
-    const date = card.dataset.date;
-    card.querySelectorAll('.yn[data-q]').forEach((yn) => {
-      const q = yn.dataset.q;
-      yn.querySelector('.yes').addEventListener('click', () => {
-        answers[date][q] = true;
-        if (q === 'bedtime') answers[date].bedtimeMinutesLate = ''; // on time → no lateness
-        renderCheckin();
-      });
-      yn.querySelector('.no').addEventListener('click', () => { answers[date][q] = false; renderCheckin(); });
-    });
-    // Update minutes-late without re-rendering (keeps the field focused while typing).
-    card.querySelector('.mins-late')?.addEventListener('input', (e) => {
-      answers[date].bedtimeMinutesLate = e.target.value;
-    });
-    card.querySelector('.save')?.addEventListener('click', () => {
+  // Autosave: fires once all four questions are answered (and again on any
+  // later change). Small delay coalesces rapid taps / minutes-late typing.
+  const scheduleAutosave = (date, delay = 600) => {
+    clearTimeout(saveTimers[date]);
+    saveTimers[date] = setTimeout(() => {
       const a = answers[date];
-      if ([a.bedtime, a.food, a.chores, a.outside].includes(null)) {
-        return toast('Answer all four questions first', true);
-      }
+      if (!a || [a.bedtime, a.food, a.chores, a.outside].includes(null)) return;
       const mins = a.bedtime === false && String(a.bedtimeMinutesLate).trim() !== ''
         ? Number(a.bedtimeMinutesLate) : null;
       if (mins !== null && (!Number.isInteger(mins) || mins < 0 || mins % 5 !== 0)) {
@@ -349,8 +353,38 @@ function renderCheckin() {
         bedtimeYes: a.bedtime, bedtimeMinutesLate: mins,
         foodYes: a.food, choresYes: a.chores, outsideYes: a.outside,
       }, 'Saved! 🎉');
+    }, delay);
+  };
+
+  view.querySelectorAll('.card').forEach((card) => {
+    const date = card.dataset.date;
+    card.querySelectorAll('.yn[data-q]').forEach((yn) => {
+      const q = yn.dataset.q;
+      yn.querySelector('.yes').addEventListener('click', () => {
+        answers[date][q] = true;
+        if (q === 'bedtime') answers[date].bedtimeMinutesLate = ''; // on time → no lateness
+        persistDraft();
+        renderCheckin();
+        scheduleAutosave(date);
+      });
+      yn.querySelector('.no').addEventListener('click', () => {
+        answers[date][q] = false;
+        persistDraft();
+        renderCheckin();
+        // Answering bedtime "No" reveals the minutes field — give a moment to type.
+        scheduleAutosave(date, q === 'bedtime' ? 4000 : 600);
+      });
     });
-    card.querySelector('.clearday')?.addEventListener('click', () => send(date, { clear: true }, 'Answers cleared'));
+    // Update minutes-late without re-rendering (keeps the field focused while typing).
+    card.querySelector('.mins-late')?.addEventListener('input', (e) => {
+      answers[date].bedtimeMinutesLate = e.target.value;
+      persistDraft();
+      scheduleAutosave(date, 1500);
+    });
+    card.querySelector('.clearday')?.addEventListener('click', () => {
+      clearTimeout(saveTimers[date]);
+      send(date, { clear: true }, 'Answers cleared');
+    });
   });
 }
 
