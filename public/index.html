@@ -551,9 +551,12 @@ async function renderBoard() {
   // months selectable in history: from 2 months ago back one year
   const histOptions = Array.from({ length: 12 }, (_, i) => monthShift(board.today.slice(0, 7), -2 - i));
   const period = boardPeriod;
-  const score = (m) => m.stats[period].bedtime + m.stats[period].food + m.stats[period].chores + m.stats[period].outside;
+  // Total = all four goal tallies + perfect days as a bonus. Ranking sorts by
+  // this total (perfect days break any remaining ties).
+  const total = (m) => m.stats[period].bedtime + m.stats[period].food + m.stats[period].chores +
+    m.stats[period].outside + m.stats[period].perfect;
   const sorted = [...board.members].sort((a, b) =>
-    b.stats[period].perfect - a.stats[period].perfect || score(b) - score(a));
+    total(b) - total(a) || b.stats[period].perfect - a.stats[period].perfect);
   const medals = ['🥇', '🥈', '🥉'];
   view.innerHTML = championBanner(board) + `<div class="card">
     <div class="tabs">
@@ -561,7 +564,7 @@ async function renderBoard() {
         `<button data-p="${p}" class="${p === period ? 'sel' : ''}">${p === 'month' ? 'This month' : p === 'year' ? 'This year' : 'All time'}</button>`).join('')}
     </div>
     <table>
-      <tr><th></th><th>🛏️</th><th>🥩</th><th>🧹</th><th>🌳</th><th>⭐</th></tr>
+      <tr><th></th><th>🛏️</th><th>🥩</th><th>🧹</th><th>🌳</th><th>⭐</th><th>🏆</th></tr>
       ${sorted.map((m, i) => `<tr>
         <td>${medals[i] ?? ''} ${esc(m.name.split(' ')[0])}<br>
           <span class="streak">${streakRow(m.stats.streaks)}</span></td>
@@ -569,10 +572,11 @@ async function renderBoard() {
         <td>${m.stats[period].food}</td>
         <td>${m.stats[period].chores}</td>
         <td>${m.stats[period].outside}</td>
-        <td><b>${m.stats[period].perfect}</b></td>
+        <td>${m.stats[period].perfect}</td>
+        <td><b>${round1(total(m))}</b></td>
       </tr>`).join('')}
     </table>
-    <p class="muted" style="margin-top:10px">🛏️ bedtime points · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four).</p>
+    <p class="muted" style="margin-top:10px">🛏️ bedtime points · 🥩 food goal · 🧹 chores · 🌳 outside &amp; exercise · ⭐ perfect days (all four) · 🏆 total = 🛏️+🥩+🧹+🌳 with ⭐ added as a bonus. Ranked by 🏆.</p>
     <p class="muted" style="margin-top:6px">🔥 streaks per goal, e.g. 5(16) = current streak (best streak ever) · ⭐ = perfect-day streak.</p>
   </div>
   <div class="card">

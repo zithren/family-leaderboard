@@ -114,9 +114,11 @@ export async function sendWeeklySummary(env) {
   const graceDays = parseInt(env.GRACE_DAYS, 10) || 3;
   const board = await leaderboard(env, today, graceDays);
 
-  const score = (m) => m.stats.month.bedtime + m.stats.month.food + m.stats.month.chores + m.stats.month.outside;
+  // Total = all four goal tallies + perfect days as a bonus (same ranking as the board).
+  const total = (m) => m.stats.month.bedtime + m.stats.month.food + m.stats.month.chores +
+    m.stats.month.outside + m.stats.month.perfect;
   const sorted = [...board.members].sort(
-    (a, b) => b.stats.month.perfect - a.stats.month.perfect || score(b) - score(a)
+    (a, b) => total(b) - total(a) || b.stats.month.perfect - a.stats.month.perfect
   );
   const medals = ['🥇', '🥈', '🥉'];
   const rows = sorted.map((m, i) => `
@@ -127,6 +129,7 @@ export async function sendWeeklySummary(env) {
       <td style="padding:6px 12px;text-align:center">${m.stats.month.chores}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.outside}</td>
       <td style="padding:6px 12px;text-align:center">${m.stats.month.perfect}</td>
+      <td style="padding:6px 12px;text-align:center"><b>${Math.round(total(m) * 10) / 10}</b></td>
       <td style="padding:6px 12px;text-align:center">🔥 ${m.stats.streaks.perfect.current}</td>
     </tr>`).join('');
   const html = `
@@ -134,7 +137,8 @@ export async function sendWeeklySummary(env) {
     <table style="border-collapse:collapse;font-family:sans-serif">
       <tr><th></th><th style="padding:6px 12px">🛏️ Bedtime</th><th style="padding:6px 12px">🥩 Food</th>
           <th style="padding:6px 12px">🧹 Chores</th><th style="padding:6px 12px">🌳 Outside</th>
-          <th style="padding:6px 12px">⭐ Perfect</th><th style="padding:6px 12px">Streak</th></tr>
+          <th style="padding:6px 12px">⭐ Perfect</th><th style="padding:6px 12px">🏆 Total</th>
+          <th style="padding:6px 12px">Streak</th></tr>
       ${rows}
     </table>
     <p style="font-family:sans-serif">Counts are for this month. <a href="${env.APP_URL}">See the full board</a>.</p>`;
